@@ -7,10 +7,13 @@
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
 #include <NTPClient.h>
-#include <WiFiUdp.h>
+//#include <WiFiUdp.h>
 #include <TimeLib.h>
 #include <map>
 #include <TinyFont.h>
+#include <TinyIcons.h>
+#include <JsonListener.h>
+#include "OpenWeatherMapForecast.h"
 
 #include <blm.h>
 
@@ -87,18 +90,21 @@ const uint16_t BLACK = display.color565(0, 0, 0);
 #define WIDGET_CLOCK 2
 #define WIDGET_TEXT 3
 #define WIDGET_TEXT_REST 4
+#define WIDGET_WEATHER_ICON 5
 #define BRIGHTNESS_AUTO 0
 #define BRIGHTNESS_STATIC 1
 #define BRIGHTNESS_TIME 2
 #define BRIGHTNESS_SUN 3
 #define MAX_CONFIG_FILE_SIZE 1024
-#define MAX_JSON_BUFFER_SIZE 400
+#define JSON_BUFFER_SIZE 1536
+#define WEATHER_UPDATE_INTERVAL 3600000
+#define NTP_UPDATE_INTERVAL 3700000
 #pragma endregion
 
 struct Widget {
   uint16_t id; // The id for the widget
   uint8_t type; // The type of widget
-  std::string name; // The filename for the image, for instance
+  std::string content; // The filename for the image, for instance
   uint8_t xOff; // The X offset for the widget
   uint8_t yOff; // The Y offset for the widget
   uint8_t width; // The width of the widget
@@ -118,23 +124,34 @@ struct Widget {
 
 std::map<std::string, uint8_t*> progmemImages = {{"blm", blmAnimations}};
 
+// Configuration values
 std::vector<Widget> widgets;
 uint16_t backgroundColor;
 uint8_t brightnessMode;
 uint8_t brightnessUpper;
 uint8_t brightnessLower;
+int timeOffset;
+bool usingWeather;
+bool metric;
+String weatherKey;
+String weatherLocation;
+
+// State values
+long weatherUpdateTime;
+uint16_t weatherID = 800;
+bool needsConfig;
 
 DoubleResetDetector drd(10, 0);
 ESP8266WebServer* server;
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP);
-
-bool needsConfig;
+NTPClient* ntpClient;
+OpenWeatherMapForecast client;
+//WiFiUDP ntpUDP;
+//NTPClient timeClient(ntpUDP);
 
 #pragma region Configuration
 void writeDefaultConfig() {
   File file = SPIFFS.open("/config.json", "w");
-  file.print("{\"widgets\":[{\"id\":0,\"type\":0,\"xOff\":0,\"yOff\":0,\"width\":64,\"height\":32,\"frequency\":0,\"name\":\"blm\"},{\"id\":1,\"type\":3,\"xOff\":5,\"yOff\":10,\"width\":53,\"height\":7,\"name\":\"ABCDEFGHIJKLM\",\"color\":34469,\"disabled\":true}],\"brightnessMode\":1,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":45402}");
+  file.print("{\"widgets\":[{\"id\":0,\"type\":0,\"xOff\":0,\"yOff\":0,\"width\":64,\"height\":32,\"content\":\"blm\"},{\"id\":1,\"type\":3,\"xOff\":5,\"yOff\":10,\"width\":53,\"height\":7,\"content\":\"ABCDEFGHIJKLM\",\"color\":34469,\"disabled\":true},{\"id\":2,\"type\":5,\"xOff\":5,\"yOff\":10,\"width\":12,\"height\":7,\"disabled\":false,\"frequency\":1000,\"bordered\":true,\"transparent\":true}],\"brightnessMode\":1,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":45402,\"timeOffset\":0,\"metric\":false,\"weatherKey\":\"3b06856c88bb59b9896ceba3d5df01c2\",\"weatherLocation\":\"2657896\"}");
   file.close();
 }
 
@@ -142,7 +159,7 @@ bool parseConfig(char data[]) {
   Serial.print("Attempting to parse config: ");
   Serial.println(data);
 
-  DynamicJsonDocument doc(MAX_JSON_BUFFER_SIZE);
+  DynamicJsonDocument doc(JSON_BUFFER_SIZE);
   DeserializationError error = deserializeJson(doc, data);
   if (error) {
     Serial.print("Failed to deserialize config file: ");
@@ -150,7 +167,11 @@ bool parseConfig(char data[]) {
     return false;
   }
   
-  uint16_t tempBackgroundColor = doc["backgroundColor"].isNull() ? 0 : doc["backgroundColor"];
+  uint16_t tempBackgroundColor = doc["backgroundColor"];
+  int tempTimeOffset = doc["timeOffset"];
+  String tempWeatherKey = doc["weatherKey"].isNull() ? "" : String(doc["weatherKey"].as<char*>());
+  String tempWeatherLocation = doc["weatherLocation"].isNull() ? "" : String(doc["weatherLocation"].as<char*>());
+  bool tempMetric = doc["metric"];
 
   if (doc["brightnessMode"].isNull() || doc["brightnessUpper"].isNull() || doc["brightnessLower"].isNull()) {
     Serial.println("Missing brightness key in config file");
@@ -165,16 +186,19 @@ bool parseConfig(char data[]) {
     Serial.println("Missing widgets key in config file");
     return false;
   }
+  bool tempUsingWeather;
   std::vector<Widget> tempWidgets;
   for (ushort i = 0; i < configWidgets.size(); i++) {
     JsonObject widget = configWidgets[i];
-    if (!widget || widget["id"].isNull() || widget["type"].isNull() || widget["xOff"].isNull() || widget["yOff"].isNull() || widget["width"].isNull() || widget["height"].isNull() || !widget["name"]) {
+    if (!widget || widget["id"].isNull() || widget["type"].isNull() || widget["xOff"].isNull() || widget["yOff"].isNull() || widget["width"].isNull() || widget["height"].isNull()) {
       Serial.printf("Failed to parse widget %i in list\n", i);
       return false;
     }
     if (widget["disabled"])
       continue;
-    tempWidgets.push_back({widget["id"], widget["type"], std::string(widget["name"].as<char*>()), widget["xOff"], widget["yOff"], widget["width"], widget["height"], widget["frequency"].isNull() ? 0 :widget["frequency"], 0, 1, widget["color"].isNull() ? 0 : widget["color"], true, BLUE, false, RED});
+    if (widget["type"] == WIDGET_WEATHER_ICON)
+      tempUsingWeather = true;
+    tempWidgets.push_back({widget["id"], widget["type"], widget["content"].isNull() ? "" : std::string(widget["content"].as<char*>()), widget["xOff"], widget["yOff"], widget["width"], widget["height"], widget["frequency"].isNull() ? 0 :widget["frequency"], 0, 1, widget["color"].isNull() ? 0 : widget["color"], widget["bordered"], BLUE, widget["transparent"], RED});
   }
   std::sort(tempWidgets.begin(), tempWidgets.end(), [](Widget w1, Widget w2){return w1.id < w2.id;});
   
@@ -185,6 +209,10 @@ bool parseConfig(char data[]) {
   brightnessMode = tempBrightnessMode;
   brightnessUpper = tempBrightnessUpper;
   backgroundColor = tempBackgroundColor;
+  timeOffset = tempTimeOffset;
+  usingWeather = tempUsingWeather;
+  weatherLocation = tempWeatherLocation;
+  weatherKey = tempWeatherKey;
 
   Serial.println("Successfully loaded configuration!");
   return true;
@@ -315,18 +343,49 @@ void drawImageFsUint8(uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t h
   }
 }
 
-void drawWidget(Widget &widget) {
+void drawWidget(Widget &widget, bool fullUpdate, bool secondary) {
   if (!widget.transparent)
     display.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.backgroundColor);
+  else if(widget.updateFrequency > 0) {
+    if (fullUpdate) {
+      if (secondary)
+        widget.backgroundBuffer.clear();
+    }
+    else if (widget.backgroundBuffer.size() == 0) {
+      Serial.println("Tried to draw empty backgroundBuffer");
+      return;
+    }
+    uint16_t i = 0;
+    for (uint8_t y = widget.yOff; y < widget.yOff + widget.height; y++) {
+      for (uint8_t x = widget.xOff; x < widget.xOff + widget.width; x++) {
+        if (fullUpdate) {
+          if (secondary) {
+            //Serial.println("write");
+            //Serial.println(i);
+            //Serial.println(widget.backgroundBuffer.size());
+            widget.backgroundBuffer.push_back(display.getPixel(x, y));
+          }
+        }
+        else {
+          //Serial.println("Read");
+          //Serial.println(i);
+          //Serial.println(widget.backgroundBuffer.size());
+          display.drawPixel(x, y, widget.backgroundBuffer.at(i));
+        }
+      }
+      yield();
+      i++;
+    }
+  }
 
   switch (widget.type) {
     case WIDGET_PROGMEM_IMAGE:
-      if (progmemImages.count(widget.name) == 0) {
+      if (progmemImages.count(widget.content) == 0) {
         Serial.print("Couldn't find PROGMEM image to draw: ");
-        Serial.println(widget.name.c_str());
+        Serial.println(widget.content.c_str());
         return;
       }
-      drawImageUint8(widget.xOff, widget.yOff, widget.width, widget.height, widget.offset, progmemImages[widget.name], true, true);
+      drawImageUint8(widget.xOff, widget.yOff, widget.width, widget.height, widget.offset, progmemImages[widget.content], true, true);
       break;
     case WIDGET_FS_IMAGE:
 
@@ -335,10 +394,17 @@ void drawWidget(Widget &widget) {
 
       break;
     case WIDGET_TEXT:
-      TFDrawText(display, widget.name.c_str(), widget.xOff + (widget.width - (TF_COLS + 1) * widget.name.length() + 1) / 2, widget.yOff + (widget.height - TF_ROWS) / 2, widget.color, true, 0);
+      TFDrawText(display, widget.content.c_str(), widget.xOff + (widget.width - (TF_COLS + 1) * widget.content.length() + 1) / 2, widget.yOff + (widget.height - TF_ROWS) / 2, widget.color, true, 0);
       break;
     case WIDGET_TEXT_REST:
 
+      break;
+    case WIDGET_WEATHER_ICON:
+      TIDrawIcon(display, weatherID, widget.xOff + 1, widget.yOff + 1, widget.state, true, widget.transparent, widget.backgroundColor);
+      if (secondary) {
+        widget.state++;
+        widget.state %= 5;
+      }
       break;
     default:
       Serial.print("Invalid widget type: ");
@@ -350,23 +416,25 @@ void drawWidget(Widget &widget) {
       display.drawRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.borderColor);
 }
 
-void drawScreen(bool fullUpdate) {
+void drawScreen(bool fullUpdate, ulong time, bool secondary) {
   if (fullUpdate)
     display.fillScreen(backgroundColor);
 
   for (uint i = 0; i < widgets.size(); i++) {
-    Widget widget = widgets[i];
-    if (!fullUpdate && (widget.updateFrequency == 0 || millis() - widget.lastUpdate < widget.updateFrequency))
+    Widget& widget = widgets[i];
+    if (!fullUpdate && (widget.updateFrequency == 0u || time - widget.lastUpdate < widget.updateFrequency))
       continue;
-    widget.lastUpdate = millis();
-    drawWidget(widget);
+    if (secondary)
+      widget.lastUpdate = time;
+    drawWidget(widget, fullUpdate, secondary);
   }
 }
 
 void updateScreen(bool fullUpdate) {
-  drawScreen(fullUpdate);
+  ulong time = millis();
+  drawScreen(fullUpdate, time, false);
   display.showBuffer();
-  drawScreen(fullUpdate);
+  drawScreen(fullUpdate, time, true);
   display.showBuffer();
 }
 #pragma endregion
@@ -390,6 +458,30 @@ void handleBrightness() {
       Serial.println(brightnessMode);
       break;
   }
+}
+
+void updateWeather() {
+  OpenWeatherMapForecastData data[1];
+  client.setMetric(metric);
+  client.setLanguage("en");
+  uint8_t allowedHours[] = {0, 12};
+  client.setAllowedHours(allowedHours, 2);
+  // See https://docs.thingpulse.com/how-tos/openweathermap-key/
+
+  if (!client.updateForecastsById(data, weatherKey, weatherLocation, 1)) {
+    Serial.println("Failed to update weather info");
+    return;
+  }
+
+  weatherID = data[0].weatherId;
+}
+
+void handleWeather() {
+  if (!usingWeather || millis() - weatherUpdateTime < WEATHER_UPDATE_INTERVAL)
+    return;
+
+  weatherUpdateTime = millis();
+  updateWeather();
 }
 
 void setup() {
@@ -459,19 +551,23 @@ void setup() {
     Serial.println("Successfully configured display");
   }
 
-  timeClient.setTimeOffset(0); // Todo: Handle timezones
-  timeClient.setUpdateInterval(3600000);
+  /*timeClient.setTimeOffset(0); // Todo: Handle timezones
+  timeClient.setUpdateInterval(NTP_UPDATE_INTERVAL);
   timeClient.begin();
-  setSyncProvider([](){return (time_t)timeClient.getEpochTime();});
+  setSyncProvider([](){return (time_t)timeClient.getEpochTime();});*/
+  ntpClient = new NTPClient("time.nist.gov", timeOffset, NTP_UPDATE_INTERVAL);
+  setSyncProvider([](){return (time_t)ntpClient->getRawTime();});
+
+  updateWeather();
 
   updateScreen(true);
 }
 
 void loop() {
-  timeClient.update();
-
+  //timeClient.update();
+  ntpClient->update();
+  handleWeather();
   handleBrightness();
   updateScreen(false);
-
   server->handleClient();
 }
