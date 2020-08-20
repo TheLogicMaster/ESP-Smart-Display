@@ -7,7 +7,6 @@
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
 #include <NTPClient.h>
-//#include <WiFiUdp.h>
 #include <TimeLib.h>
 #include <map>
 #include <TinyFont.h>
@@ -17,11 +16,37 @@
 
 #include <blm.h>
 
+#pragma region Constants
+
+#define WIDGET_PROGMEM_IMAGE 0
+#define WIDGET_FS_IMAGE 1
+#define WIDGET_CLOCK 2
+#define WIDGET_ANALOG_CLOCK 3
+#define WIDGET_TEXT 4
+#define WIDGET_TEXT_REST 5
+#define WIDGET_TEXT_BIG 6
+#define WIDGET_WEATHER_ICON 7
+#define WIDGET_CLOCK_BIG 8
+#define BRIGHTNESS_AUTO 0
+#define BRIGHTNESS_STATIC 1
+#define BRIGHTNESS_TIME 2
+#define BRIGHTNESS_SUN 3
+#define MAX_CONFIG_FILE_SIZE 1536
+#define JSON_BUFFER_SIZE 2048
+#define WEATHER_UPDATE_INTERVAL 3600000
+#define NTP_UPDATE_INTERVAL 3700000
+#define PIXEL_YIELD_THRESHOLD 100
+#define DISPLAY_WIDTH 64
+#define DISPLAY_HEIGHT 32
+#pragma endregion
+
 #pragma region PxMatrix
 //#define PxMATRIX_COLOR_DEPTH 4
 #define double_buffer
-#define PxMATRIX_MAX_HEIGHT 32
+#define PxMATRIX_MAX_HEIGHT DISPLAY_HEIGHT
+#define PxMATRIX_MAX_WIDTH DISPLAY_WIDTH
 #include <PxMatrix.h>
+//#include <CustomPxMatrix.h>
 
 #ifdef ESP32
 
@@ -75,7 +100,6 @@ void IRAM_ATTR display_updater() {
 #endif
 #pragma endregion
 
-#pragma region Constants
 const uint16_t RED = display.color565(255, 0, 0);
 const uint16_t GREEN = display.color565(0, 255, 0);
 const uint16_t BLUE = display.color565(0, 0, 255);
@@ -85,21 +109,87 @@ const uint16_t CYAN = display.color565(0, 255, 255);
 const uint16_t MAGENTA = display.color565(255, 0, 255);
 const uint16_t BLACK = display.color565(0, 0, 0);
 
-#define WIDGET_PROGMEM_IMAGE 0
-#define WIDGET_FS_IMAGE 1
-#define WIDGET_CLOCK 2
-#define WIDGET_TEXT 3
-#define WIDGET_TEXT_REST 4
-#define WIDGET_WEATHER_ICON 5
-#define BRIGHTNESS_AUTO 0
-#define BRIGHTNESS_STATIC 1
-#define BRIGHTNESS_TIME 2
-#define BRIGHTNESS_SUN 3
-#define MAX_CONFIG_FILE_SIZE 1024
-#define JSON_BUFFER_SIZE 1536
-#define WEATHER_UPDATE_INTERVAL 3600000
-#define NTP_UPDATE_INTERVAL 3700000
-#pragma endregion
+struct coords {
+  int16_t x;
+  int16_t y;
+};
+
+class DisplayBuffer : public Adafruit_GFX {
+
+  bool rotate;
+  bool flip;
+  uint16_t* buffer;
+
+  public:
+  DisplayBuffer(uint8_t width, uint8_t height) : Adafruit_GFX(width, height) {
+    buffer = new uint16_t[width * height];
+    rotate = false;
+    flip = false;
+  }
+
+  void setRotate(bool rotate) {
+    this->rotate = rotate;
+  }
+
+  void setFlip(bool flip) {
+    this->flip = flip;
+  }
+
+  coords transformCoords(int16_t x, int16_t y) {
+  if (rotate){
+    int16_t temp_x=x;
+    x=y;
+    y=_height-1-temp_x;
+  }
+  // Todo: Verify transformations are correct
+  if (flip)
+    x =_width - 1 -x;
+  
+   if ((x < 0) || (x >= _width) || (y < 0) || (y >= _height)) {
+      Serial.printf("DisplayBuffer: Transformed coordinates out of range: (%i, %i)\n", x, y);
+      yield();
+      return coords{0, 0};
+    }
+    return coords{x, y};
+  }
+
+  void drawPixel(int16_t x, int16_t y, uint16_t color) {
+    if (buffer == nullptr) {
+      Serial.println("DisplayBuffer: Buffer is null");
+      return;
+    }
+    //Serial.printf("Coordinates: (%i, %i)\n", x, y);
+    coords c = transformCoords(x, y);
+    if (c.y * _width + c.x >= _width * _height) {
+      Serial.println("DisplayBuffer: index out of range");
+      return;
+    }
+    buffer[c.y * _width + c.x] = color;
+  }
+
+  void write(Adafruit_GFX& display, uint8_t xOff, uint8_t yOff, uint8_t width, uint8_t height) {
+    if (buffer == nullptr) {
+      Serial.println("DisplayBuffer: Buffer is null");
+      return;
+    }
+
+    for (uint8_t x = xOff; x < xOff + width; x++) {
+      for (uint8_t y = yOff; y < yOff + height; y++) {
+        if (y * _width + x >= _width * _height) {
+          Serial.println("DisplayBuffer: index out of range");
+          return;
+        }
+        display.drawPixel(x, y, buffer[y * _width + x]);
+      }
+      if (width * height > PIXEL_YIELD_THRESHOLD)
+        yield();
+    }
+  }
+
+  void close() {
+    delete(buffer);
+  }
+};
 
 struct Widget {
   uint16_t id; // The id for the widget
@@ -112,14 +202,15 @@ struct Widget {
   uint16_t updateFrequency; // The number of milliseconds between widget updates
   uint8_t offset; // The offset for animations, for instance
   uint8_t length; // The length of animations, for instance
-  uint16_t color; // The color for text, for instance
+  std::vector<uint16_t> colors; // The colors for text, for instance
   bool bordered; // Whether the widget has a border or not
   uint16_t borderColor; // The color of a border
   bool transparent; // Whether to fill region with backgroundColor before drawing widget or not
   uint16_t backgroundColor; // The background color if used
-  std::vector<uint16_t> backgroundBuffer; // Store background data behind widget for partial re-draws
+  bool background; // Whether the widget exists in the background or not
   ulong lastUpdate; // When the widget was last updated
   uint8_t state; // The animation frame, for instance
+  bool dirty;
 };
 
 std::map<std::string, uint8_t*> progmemImages = {{"blm", blmAnimations}};
@@ -132,27 +223,29 @@ uint8_t brightnessUpper;
 uint8_t brightnessLower;
 int timeOffset;
 bool usingWeather;
+bool usingTransparency;
 bool metric;
 String weatherKey;
 String weatherLocation;
 
 // State values
 long weatherUpdateTime;
-uint16_t weatherID = 800;
-bool needsConfig;
+uint16_t weatherID = 200;
+bool needsConfig; // If a configuration is needed
+bool needsUpdate; // If a full update is needed
+std::vector<uint16_t> backgroundBuffer;
 
 DoubleResetDetector drd(10, 0);
 ESP8266WebServer* server;
 NTPClient* ntpClient;
 OpenWeatherMapForecast client;
-//WiFiUDP ntpUDP;
-//NTPClient timeClient(ntpUDP);
+DisplayBuffer* displayBuffer;\
 
 #pragma region Configuration
 void writeDefaultConfig() {
   File file = SPIFFS.open("/config.json", "w");
-  file.print("{\"widgets\":[{\"id\":0,\"type\":0,\"xOff\":0,\"yOff\":0,\"width\":64,\"height\":32,\"content\":\"blm\"},{\"id\":1,\"type\":3,\"xOff\":5,\"yOff\":10,\"width\":53,\"height\":7,\"content\":\"ABCDEFGHIJKLM\",\"color\":34469,\"disabled\":true},{\"id\":2,\"type\":5,\"xOff\":5,\"yOff\":10,\"width\":12,\"height\":7,\"disabled\":false,\"frequency\":1000,\"bordered\":true,\"transparent\":true}],\"brightnessMode\":1,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":45402,\"timeOffset\":0,\"metric\":false,\"weatherKey\":\"3b06856c88bb59b9896ceba3d5df01c2\",\"weatherLocation\":\"2657896\"}");
-  file.close();
+  file.print("{\"widgets\":[{\"id\":0,\"type\":0,\"xOff\":0,\"yOff\":0,\"width\":64,\"height\":32,\"content\":\"blm\",\"disabled\":false,\"background\":true,\"frequency\":10000,\"length\":2},{\"id\":1,\"type\":4,\"xOff\":33,\"yOff\":15,\"width\":29,\"height\":7,\"content\":\"ABCDEFG\",\"colors\":[14304],\"disabled\":false,\"transparent\":false,\"backgroundColor\":63488,\"bordered\":true,\"borderColor\":63488},{\"id\":2,\"type\":7,\"xOff\":29,\"yOff\":2,\"width\":12,\"height\":7,\"disabled\":false,\"frequency\":1000,\"transparent\":false,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":3,\"type\":6,\"xOff\":1,\"yOff\":23,\"width\":61,\"height\":9,\"content\":\"ABCDEFGHIJ\",\"colors\":[14304],\"disabled\":false,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":4,\"type\":3,\"xOff\":46,\"yOff\":0,\"width\":15,\"height\":15,\"colors\":[10000, 20000],\"disabled\":false,\"frequency\":60000,\"bordered\":true,\"borderColor\":63488,\"backgroundColor\":0},{\"id\":5,\"type\":8,\"xOff\":1,\"yOff\":11,\"width\":31,\"height\":9,\"colors\":[14304],\"disabled\":false,\"frequency\":1000,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":5,\"type\":2,\"xOff\":2,\"yOff\":2,\"width\":21,\"height\":7,\"colors\":[2042],\"disabled\":false,\"frequency\":1000,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488}],\"brightnessMode\":1,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":0,\"timeOffset\":-4,\"metric\":false,\"weatherKey\":\"\",\"weatherLocation\":\"5014227\",\"transparency\":true}");
+  file.close(); // 
 }
 
 bool parseConfig(char data[]) {
@@ -172,6 +265,8 @@ bool parseConfig(char data[]) {
   String tempWeatherKey = doc["weatherKey"].isNull() ? "" : String(doc["weatherKey"].as<char*>());
   String tempWeatherLocation = doc["weatherLocation"].isNull() ? "" : String(doc["weatherLocation"].as<char*>());
   bool tempMetric = doc["metric"];
+  bool tempTransparency = doc["transparency"];
+
 
   if (doc["brightnessMode"].isNull() || doc["brightnessUpper"].isNull() || doc["brightnessLower"].isNull()) {
     Serial.println("Missing brightness key in config file");
@@ -198,11 +293,41 @@ bool parseConfig(char data[]) {
       continue;
     if (widget["type"] == WIDGET_WEATHER_ICON)
       tempUsingWeather = true;
-    tempWidgets.push_back({widget["id"], widget["type"], widget["content"].isNull() ? "" : std::string(widget["content"].as<char*>()), widget["xOff"], widget["yOff"], widget["width"], widget["height"], widget["frequency"].isNull() ? 0 :widget["frequency"], 0, 1, widget["color"].isNull() ? 0 : widget["color"], widget["bordered"], BLUE, widget["transparent"], RED});
+
+    std::vector<uint16_t> colors;
+    JsonArray c = widget["colors"];
+    switch (widget["type"].as<uint8_t>()) {
+    case WIDGET_ANALOG_CLOCK:
+      if (c.size() < 2) {
+        Serial.println("Analog clocks require 2 color arguments");
+        return false;
+      }
+      break;
+    case WIDGET_CLOCK:
+      if (c.size() < 1) {
+        Serial.println("Digital clocks require 1 color argument");
+        return false;
+      }
+      break;
+    case WIDGET_TEXT_BIG:
+    case WIDGET_TEXT:
+      if (c.size() < 1) {
+        Serial.println("Text require 1 color argument");
+        return false;
+      }
+      break;
+    default:
+      break;
+    }
+    for (uint i = 0; i < c.size(); i++)
+      colors.push_back(c[i]);
+    
+    tempWidgets.push_back({widget["id"], widget["type"], widget["content"].isNull() ? "" : std::string(widget["content"].as<char*>()), widget["xOff"], widget["yOff"], widget["width"], widget["height"], widget["frequency"], widget["offset"], widget["length"], colors, widget["bordered"], widget["borderColor"], widget["transparent"], widget["backgroundColor"].as<uint16_t>(), widget["background"]});
   }
   std::sort(tempWidgets.begin(), tempWidgets.end(), [](Widget w1, Widget w2){return w1.id < w2.id;});
   
   // Only load new configuration after successful completion of config parsing
+  needsUpdate = true;
   needsConfig = false;
   widgets = tempWidgets;
   brightnessLower = tempBrightnessLower;
@@ -213,8 +338,21 @@ bool parseConfig(char data[]) {
   usingWeather = tempUsingWeather;
   weatherLocation = tempWeatherLocation;
   weatherKey = tempWeatherKey;
+  metric = tempMetric;
+  usingTransparency = tempTransparency;
+
+  // Transparency uses about an extra 4KB
+  if (usingTransparency && displayBuffer == nullptr) {
+    Serial.println("Creating display buffer for transparency...");
+    displayBuffer = new DisplayBuffer(DISPLAY_WIDTH, DISPLAY_HEIGHT);
+  } else if (!usingTransparency && displayBuffer != nullptr) {
+    Serial.println("Freeing display buffer...");
+    displayBuffer->close();
+    delete(displayBuffer);
+  }
 
   Serial.println("Successfully loaded configuration!");
+  Serial.printf("Memory Free: %i, Fragmentation: %i%%\n", ESP.getFreeHeap(), ESP.getHeapFragmentation());
   return true;
 }
 
@@ -226,6 +364,8 @@ bool getConfig() {
   }
   
   size_t size = configFile.size();
+  Serial.print("Configuration file size: ");
+  Serial.println(size);
   if (size > MAX_CONFIG_FILE_SIZE) {
     Serial.println("Config file size is too large, replacing with default...");
     configFile.close();
@@ -316,7 +456,15 @@ void uploadFile() {
 #pragma endregion
 
 #pragma region Rendering
-void drawImageUint8(uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset, uint8_t data[], bool yields, bool progMem) {
+void drawImageUint8(Adafruit_GFX& d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset, const char name[], bool progMem) {
+  if (progmemImages.count(name) == 0) {
+    Serial.print("Couldn't find PROGMEM image to draw: ");
+    Serial.println(name);
+    return;
+  }
+
+  // Todo: Check for end of data...
+  uint8_t* data = progmemImages[name];
   uint16_t line_buffer[width];
   for (uint8_t y = 0; y < height; y++) {
     if (progMem)
@@ -324,87 +472,87 @@ void drawImageUint8(uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t hei
     else
       memcpy(line_buffer, data + offset * width * height * 2 + y * width * 2, width * 2);
     for (uint8_t x = 0; x < width; x++) 
-      display.drawPixelRGB565(xOffset + x, yOffset + y, line_buffer[x]);
-    if (yields)
+      d.drawPixel(xOffset + x, yOffset + y, line_buffer[x]);
+    if (width * height > PIXEL_YIELD_THRESHOLD)
       yield();
   }
 }
 
-void drawImageFsUint8(uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset, uint8_t data[], bool yields) {
-  File file = SPIFFS.open("background", "r");
+void drawImageFsUint8(Adafruit_GFX& d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset, const char name[]) {
+  if (!SPIFFS.exists(name)) {
+    Serial.print("Couldn't find image to draw for: ");
+    Serial.println(name);
+    return;
+  }
+
+  File file = SPIFFS.open(name, "r");
   char line_buffer[width * 2];
   for (uint8_t y = 0; y < height; y++) {
     file.seek(offset * width * height * 2 + y * width * 2);
     file.readBytes(line_buffer, width * 2);
     for (uint8_t x = 0; x < width; x++)
-      display.drawPixelRGB565(xOffset + x, yOffset + y, line_buffer[x * 2] | line_buffer[x * 2 + 1] << 8);
-    if (yields)
+      d.drawPixel(xOffset + x, yOffset + y, line_buffer[x * 2] | line_buffer[x * 2 + 1] << 8);
+    if (width * height > PIXEL_YIELD_THRESHOLD)
       yield();
   }
 }
 
-void drawWidget(Widget &widget, bool fullUpdate, bool secondary) {
-  if (!widget.transparent)
-    display.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.backgroundColor);
-  else if(widget.updateFrequency > 0) {
-    if (fullUpdate) {
-      if (secondary)
-        widget.backgroundBuffer.clear();
-    }
-    else if (widget.backgroundBuffer.size() == 0) {
-      Serial.println("Tried to draw empty backgroundBuffer");
-      return;
-    }
-    uint16_t i = 0;
-    for (uint8_t y = widget.yOff; y < widget.yOff + widget.height; y++) {
-      for (uint8_t x = widget.xOff; x < widget.xOff + widget.width; x++) {
-        if (fullUpdate) {
-          if (secondary) {
-            //Serial.println("write");
-            //Serial.println(i);
-            //Serial.println(widget.backgroundBuffer.size());
-            widget.backgroundBuffer.push_back(display.getPixel(x, y));
-          }
-        }
-        else {
-          //Serial.println("Read");
-          //Serial.println(i);
-          //Serial.println(widget.backgroundBuffer.size());
-          display.drawPixel(x, y, widget.backgroundBuffer.at(i));
-        }
-      }
-      yield();
-      i++;
-    }
-  }
+void drawAnalogClock(Adafruit_GFX& d, uint8_t xOffset, uint8_t yOffset, uint8_t radius, uint16_t colorMinute, uint16_t colorHour) {
+  uint h = hourFormat12();
+  uint m = minute();
+  d.drawLine(xOffset + radius, yOffset + radius, xOffset + radius + round(cos(2 * PI * (m / 60. - .25)) * (radius - 1)), yOffset + radius + round(sin(2 * PI * (m / 60. - .25)) * (radius - 1)), colorMinute);
+  d.drawLine(xOffset + radius, yOffset + radius, xOffset + radius + round(cos(2 * PI * (h / 12. - .25)) * (radius - 3)), yOffset + radius + round(sin(2 * PI * (h / 12. - .25)) * (radius - 3)), colorHour);
+}
 
+const char* getTimeText() {
+  uint h = hourFormat12();
+  uint m = minute();
+  std::string text;
+  if (h < 10)
+    text.append("0");
+  text.append(dtostrf(h, h < 10 ? 1 : 2, 0, " "));
+  text.append(":");
+  if (m < 10)
+    text.append("0");
+  text.append(dtostrf(m, m < 10 ? 1 : 2, 0, " "));
+  return text.c_str();
+}
+
+void drawBigText(Adafruit_GFX& d, const char* text, uint8_t xOffset, uint8_t yOffset, uint16_t color) {
+  d.setTextColor(color);
+  d.setCursor(xOffset, yOffset);
+  d.print(text);
+}
+
+void incrementWidgetState(Widget& widget, uint8_t max) {
+  if (max > 0) {
+    widget.state++;
+    widget.state %= max;
+    widget.dirty = true;
+  }
+}
+
+void incrementWidgetState(Widget& widget) {
+  incrementWidgetState(widget, widget.length);
+}
+
+void updateWidget(Widget& widget) {
   switch (widget.type) {
     case WIDGET_PROGMEM_IMAGE:
-      if (progmemImages.count(widget.content) == 0) {
-        Serial.print("Couldn't find PROGMEM image to draw: ");
-        Serial.println(widget.content.c_str());
-        return;
-      }
-      drawImageUint8(widget.xOff, widget.yOff, widget.width, widget.height, widget.offset, progmemImages[widget.content], true, true);
-      break;
     case WIDGET_FS_IMAGE:
-
-      break;
-    case WIDGET_CLOCK:
-
-      break;
-    case WIDGET_TEXT:
-      TFDrawText(display, widget.content.c_str(), widget.xOff + (widget.width - (TF_COLS + 1) * widget.content.length() + 1) / 2, widget.yOff + (widget.height - TF_ROWS) / 2, widget.color, true, 0);
+      incrementWidgetState(widget);
       break;
     case WIDGET_TEXT_REST:
 
       break;
     case WIDGET_WEATHER_ICON:
-      TIDrawIcon(display, weatherID, widget.xOff + 1, widget.yOff + 1, widget.state, true, widget.transparent, widget.backgroundColor);
-      if (secondary) {
-        widget.state++;
-        widget.state %= 5;
-      }
+      incrementWidgetState(widget, 5);
+      break;
+    case WIDGET_CLOCK:
+    case WIDGET_CLOCK_BIG:
+    case WIDGET_ANALOG_CLOCK:
+    case WIDGET_TEXT_BIG:
+    case WIDGET_TEXT:
       break;
     default:
       Serial.print("Invalid widget type: ");
@@ -412,30 +560,101 @@ void drawWidget(Widget &widget, bool fullUpdate, bool secondary) {
       break;
     }
 
-    if (widget.bordered)
-      display.drawRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.borderColor);
+  if (widget.background)
+    needsUpdate = true;
+  widget.lastUpdate = millis();
 }
 
-void drawScreen(bool fullUpdate, ulong time, bool secondary) {
+void updateWidgets() {
+  for (uint i = 0; i < widgets.size(); i++) 
+    if (widgets[i].updateFrequency > 0 && millis() - widgets[i].lastUpdate > widgets[i].updateFrequency) 
+      updateWidget(widgets[i]);
+}
+
+void drawWidget(Adafruit_GFX& d, Widget &widget, bool buffering) {
+  if (!usingTransparency || !widget.transparent) {
+    if (widget.type == WIDGET_ANALOG_CLOCK)
+      d.fillCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2, widget.backgroundColor);
+    else
+      d.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.backgroundColor);
+  }
+  else if (!buffering) {
+    displayBuffer->write(display, widget.xOff, widget.yOff, widget.width, widget.height);
+  }
+
+  // Todo: check if background widgets change to queue a full update on the next frame
+  switch (widget.type) {
+    case WIDGET_PROGMEM_IMAGE:
+      drawImageUint8(d, widget.xOff, widget.yOff, widget.width, widget.height, widget.state + widget.offset, widget.content.c_str(), true);
+      break;
+    case WIDGET_FS_IMAGE:
+      drawImageFsUint8(d, widget.xOff, widget.yOff, widget.width, widget.height, widget.state + widget.offset, widget.content.c_str());
+      break;
+    case WIDGET_CLOCK:
+      TFDrawText(d, getTimeText(), widget.xOff + (widget.width - (TF_COLS + 1) * 5 + 1) / 2, widget.yOff + (widget.height - TF_ROWS) / 2, widget.colors[0], true, 0);
+      break;
+    case WIDGET_CLOCK_BIG:
+      drawBigText(d, getTimeText(), widget.xOff + (widget.width - 29) / 2, widget.yOff + (widget.height - 6) / 2, widget.colors[0]);
+      break;
+    case WIDGET_ANALOG_CLOCK:
+      drawAnalogClock(d, widget.xOff, widget.yOff, widget.height / 2, widget.colors[0], widget.colors[1]);
+      break;
+    case WIDGET_TEXT:
+      TFDrawText(d, widget.content.c_str(), widget.xOff + (widget.width - (TF_COLS + 1) * widget.content.length() + 1) / 2, widget.yOff + (widget.height - TF_ROWS) / 2, widget.colors[0], true, 0);
+      break;
+    case WIDGET_TEXT_REST:
+
+      break;
+    case WIDGET_TEXT_BIG:
+      drawBigText(d, widget.content.c_str(), widget.xOff + (widget.width - 6 * widget.content.length() + 1) / 2, widget.yOff + (widget.height - 7) / 2, widget.colors[0]);
+      break;
+    case WIDGET_WEATHER_ICON:
+      TIDrawIcon(d, weatherID, widget.xOff + 1, widget.yOff + 1, widget.state, true, widget.transparent, widget.backgroundColor);
+      break;
+    default:
+      Serial.print("Invalid widget type: ");
+      Serial.println(widget.type);
+      break;
+    }
+
+    if (widget.bordered) {
+      if (widget.type == WIDGET_ANALOG_CLOCK)
+        d.drawCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2, widget.borderColor);
+      else
+        d.drawRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.borderColor);
+    }
+}
+
+void drawScreen(Adafruit_GFX& d, bool fullUpdate, bool buffering, bool finalize) {
   if (fullUpdate)
-    display.fillScreen(backgroundColor);
+    d.fillScreen(backgroundColor);
 
   for (uint i = 0; i < widgets.size(); i++) {
     Widget& widget = widgets[i];
-    if (!fullUpdate && (widget.updateFrequency == 0u || time - widget.lastUpdate < widget.updateFrequency))
+    if (buffering && !widget.background)
+      return; // Background widgets should not come after foreground ones
+      //continue;
+
+    if (!fullUpdate && !widget.dirty)
       continue;
-    if (secondary)
-      widget.lastUpdate = time;
-    drawWidget(widget, fullUpdate, secondary);
+    
+    drawWidget(d, widget, buffering);
+
+    if (finalize)
+      widget.dirty = false;
   }
 }
 
 void updateScreen(bool fullUpdate) {
-  ulong time = millis();
-  drawScreen(fullUpdate, time, false);
+  needsUpdate = false;
+  updateWidgets();
+  if (needsUpdate)
+    return;
+  if (usingTransparency && fullUpdate) 
+    drawScreen(*displayBuffer, fullUpdate, true, false);
+  drawScreen(display, fullUpdate, false, false);
   display.showBuffer();
-  drawScreen(fullUpdate, time, true);
-  display.showBuffer();
+  drawScreen(display, fullUpdate, false, true);
 }
 #pragma endregion
 
@@ -551,23 +770,18 @@ void setup() {
     Serial.println("Successfully configured display");
   }
 
-  /*timeClient.setTimeOffset(0); // Todo: Handle timezones
-  timeClient.setUpdateInterval(NTP_UPDATE_INTERVAL);
-  timeClient.begin();
-  setSyncProvider([](){return (time_t)timeClient.getEpochTime();});*/
-  ntpClient = new NTPClient("time.nist.gov", timeOffset, NTP_UPDATE_INTERVAL);
+  ntpClient = new NTPClient("time.nist.gov", 3600 * timeOffset, NTP_UPDATE_INTERVAL);
+  ntpClient->begin();
   setSyncProvider([](){return (time_t)ntpClient->getRawTime();});
+  setSyncInterval(10);
 
   updateWeather();
-
-  updateScreen(true);
 }
 
 void loop() {
-  //timeClient.update();
   ntpClient->update();
   handleWeather();
   handleBrightness();
-  updateScreen(false);
+  updateScreen(needsUpdate);
   server->handleClient();
 }
