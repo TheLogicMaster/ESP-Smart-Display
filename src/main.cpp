@@ -266,6 +266,8 @@ uint16_t weatherID = 200;
 bool needsConfig; // If a configuration is needed
 bool needsUpdate; // If a full update is needed
 std::vector <uint16_t> backgroundBuffer;
+uint8_t theHour;
+uint8_t theMinute;
 
 DoubleResetDetector drd(10, 0);
 ESP8266WebServer *server;
@@ -279,7 +281,7 @@ DisplayBuffer *displayBuffer;
 void writeDefaultConfig() {
     File file = SPIFFS.open("/config.json", "w");
     file.print(
-            "{\"widgets\":[{\"id\":0,\"type\":0,\"xOff\":0,\"yOff\":0,\"width\":64,\"height\":32,\"content\":\"blm\",\"disabled\":false,\"background\":true,\"frequency\":10000,\"length\":2},{\"id\":1,\"type\":4,\"xOff\":33,\"yOff\":15,\"width\":29,\"height\":7,\"content\":\"ABCDEFG\",\"colors\":[14304],\"disabled\":false,\"transparent\":false,\"backgroundColor\":63488,\"bordered\":true,\"borderColor\":63488},{\"id\":2,\"type\":7,\"xOff\":29,\"yOff\":2,\"width\":12,\"height\":7,\"disabled\":false,\"frequency\":1000,\"transparent\":false,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":3,\"type\":6,\"xOff\":1,\"yOff\":23,\"width\":61,\"height\":9,\"content\":\"ABCDEFGHIJ\",\"colors\":[14304],\"disabled\":false,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":4,\"type\":3,\"xOff\":46,\"yOff\":0,\"width\":15,\"height\":15,\"colors\":[10000, 20000],\"disabled\":false,\"frequency\":60000,\"bordered\":true,\"borderColor\":63488,\"backgroundColor\":0},{\"id\":5,\"type\":8,\"xOff\":1,\"yOff\":11,\"width\":31,\"height\":9,\"colors\":[14304],\"disabled\":false,\"frequency\":1000,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":5,\"type\":2,\"xOff\":2,\"yOff\":2,\"width\":21,\"height\":7,\"colors\":[2042],\"disabled\":false,\"frequency\":1000,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":10,\"type\":0,\"xOff\":15,\"yOff\":0,\"width\":25,\"height\":30,\"content\":\"taz1\",\"disabled\":false,\"background\":false,\"frequency\":10000,\"length\":1}],\"brightnessMode\":1,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":0,\"timezone\":\"eastern\",\"metric\":false,\"weatherKey\":\"\",\"weatherLocation\":\"5014227\",\"transparency\":true}");
+            "{\"widgets\":[{\"id\":0,\"type\":0,\"xOff\":0,\"yOff\":0,\"width\":64,\"height\":32,\"content\":\"blm\",\"disabled\":false,\"background\":true,\"frequency\":10000,\"length\":2},{\"id\":1,\"type\":4,\"xOff\":33,\"yOff\":15,\"width\":29,\"height\":7,\"content\":\"ABCDEFG\",\"colors\":[14304],\"disabled\":false,\"transparent\":false,\"backgroundColor\":63488,\"bordered\":true,\"borderColor\":63488},{\"id\":2,\"type\":7,\"xOff\":29,\"yOff\":2,\"width\":12,\"height\":7,\"disabled\":false,\"frequency\":1000,\"transparent\":false,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":3,\"type\":6,\"xOff\":1,\"yOff\":23,\"width\":61,\"height\":9,\"content\":\"ABCDEFGHIJ\",\"colors\":[14304],\"disabled\":false,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":4,\"type\":3,\"xOff\":46,\"yOff\":0,\"width\":15,\"height\":15,\"colors\":[10000, 20000, 2042],\"disabled\":false,\"frequency\":60000,\"bordered\":true,\"borderColor\":63488,\"backgroundColor\":0},{\"id\":5,\"type\":8,\"xOff\":1,\"yOff\":11,\"width\":31,\"height\":9,\"colors\":[14304],\"disabled\":false,\"frequency\":1000,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":5,\"type\":2,\"xOff\":2,\"yOff\":2,\"width\":21,\"height\":7,\"colors\":[2042],\"disabled\":false,\"frequency\":1000,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":10,\"type\":0,\"xOff\":15,\"yOff\":0,\"width\":25,\"height\":30,\"content\":\"taz1\",\"disabled\":false,\"background\":false,\"frequency\":10000,\"length\":1}],\"brightnessMode\":1,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":0,\"timezone\":\"eastern\",\"metric\":false,\"weatherKey\":\"\",\"weatherLocation\":\"5014227\",\"transparency\":true}");
     file.close();
 }
 
@@ -337,7 +339,7 @@ bool parseConfig(char data[]) {
         JsonArray c = widget["colors"];
         switch (widget["type"].as<uint8_t>()) {
             case WIDGET_ANALOG_CLOCK:
-                if (c.size() < 2) {
+                if (c.size() < 3) {
                     Serial.println("Analog clocks require 2 color arguments");
                     return false;
                 }
@@ -573,28 +575,30 @@ drawGimpImage(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, 
 }
 
 void drawAnalogClock(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t radius, uint16_t colorMinute,
-                     uint16_t colorHour) {
-    uint h = hourFormat12();
-    uint m = minute();
-    d.drawLine(xOffset + radius, yOffset + radius,
-               xOffset + radius + round(cos(2 * PI * (m / 60. - .25)) * (radius - 1)),
-               yOffset + radius + round(sin(2 * PI * (m / 60. - .25)) * (radius - 1)), colorMinute);
-    d.drawLine(xOffset + radius, yOffset + radius,
-               xOffset + radius + round(cos(2 * PI * (h / 12. - .25)) * (radius - 3)),
-               yOffset + radius + round(sin(2 * PI * (h / 12. - .25)) * (radius - 3)), colorHour);
+                     uint16_t colorHour, uint16_t colorMarking) {
+    double minAngle = 2 * PI * (theMinute / 60. - .25);
+    double hourAngle = 2 * PI * (theHour / 12. + theMinute / 720. - .25);
+    for (uint i = 0; i < 12; i++) {
+        double angle = 2 * PI * i / 12.;
+        d.drawPixel(xOffset + round(cos(angle) * radius), yOffset + round(sin(angle) * radius), colorMarking);
+    }
+    d.drawLine(xOffset, yOffset,
+               xOffset + round(cos(minAngle) * radius * .9),
+               yOffset + round(sin(minAngle) * radius * .9), colorMinute);
+    d.drawLine(xOffset, yOffset,
+               xOffset + round(cos(hourAngle) * radius * .5),
+               yOffset + round(sin(hourAngle) * radius * .5), colorHour);
 }
 
 const char *getTimeText() {
-    uint h = hourFormat12();
-    uint m = minute();
     std::string text;
-    if (h < 10)
+    if (theHour < 10)
         text.append("0");
-    text.append(dtostrf(h, h < 10 ? 1 : 2, 0, " "));
+    text.append(dtostrf(theHour, theHour < 10 ? 1 : 2, 0, " "));
     text.append(":");
-    if (m < 10)
+    if (theMinute < 10)
         text.append("0");
-    text.append(dtostrf(m, m < 10 ? 1 : 2, 0, " "));
+    text.append(dtostrf(theMinute, theMinute < 10 ? 1 : 2, 0, " "));
     return text.c_str();
 }
 
@@ -703,7 +707,7 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
                         widget.colors[0]);
             break;
         case WIDGET_ANALOG_CLOCK:
-            drawAnalogClock(d, widget.xOff, widget.yOff, widget.height / 2, widget.colors[0], widget.colors[1]);
+            drawAnalogClock(d, widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2 - (widget.bordered ? 1 : 0), widget.colors[0], widget.colors[1], widget.colors[2]);
             break;
         case WIDGET_TEXT:
             TFDrawText(d, widget.content.c_str(),
@@ -890,6 +894,8 @@ void setup() {
 
 void loop() {
     ntpClient->update();
+    theHour = hourFormat12();
+    theMinute = minute();
     handleWeather();
     handleBrightness();
     updateScreen(needsUpdate);
