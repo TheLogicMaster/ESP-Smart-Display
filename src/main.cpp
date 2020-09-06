@@ -1,5 +1,6 @@
 #include <Arduino.h>
-#include <FS.h>
+//#include <FS.h>
+#include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <ESP_DoubleResetDetector.h>
 #include <ESP8266WiFi.h>
@@ -14,6 +15,8 @@
 #include <JsonListener.h>
 #include "OpenWeatherMapForecast.h"
 #include <Timezone.h>
+#include <ESP8266HTTPClient.h>
+#include "ESP8266HTTPUpdateServer.h"
 
 #include <BLM.h>
 #include <TazIcon.h>
@@ -26,24 +29,40 @@
 #define WIDGET_CLOCK 2
 #define WIDGET_ANALOG_CLOCK 3
 #define WIDGET_TEXT 4
-#define WIDGET_TEXT_REST 5
+#define WIDGET_TEXT_GET_JSON 5
 #define WIDGET_TEXT_BIG 6
 #define WIDGET_WEATHER_ICON 7
 #define WIDGET_CLOCK_BIG 8
+#define WIDGET_TEXT_GET_JSON_BIG 9
+#define WIDGET_TEXT_GET 10
+#define WIDGET_TEXT_GET_BIG 11
 #define IMAGE_UINT8 0
 #define IMAGE_UINT16 1
 #define IMAGE_GIMP 2
-#define BRIGHTNESS_AUTO 0
-#define BRIGHTNESS_STATIC 1
+#define BRIGHTNESS_STATIC 0
+#define BRIGHTNESS_AUTO 1
 #define BRIGHTNESS_TIME 2
 #define BRIGHTNESS_SUN 3
-#define MAX_CONFIG_FILE_SIZE 2048
-#define JSON_BUFFER_SIZE 2048
+#define MAX_CONFIG_FILE_SIZE 3000
+#define CONFIG_JSON_BUFFER_SIZE 3500
+#define MAX_IMAGE_DATA_FILE_SIZE 2000
+#define IMAGE_JSON_BUFFER_SIZE 2500
+#define JSON_TYPE_STRING 0
+#define JSON_TYPE_LONG 1
+#define JSON_TYPE_BOOL 2
+#define CLOCK_TYPE_24 0
+#define CLOCK_TYPE_12 1
+#define CLOCK_TYPE_12_PERIOD 2
 #define WEATHER_UPDATE_INTERVAL 3600000
 #define NTP_UPDATE_INTERVAL 3700000
 #define PIXEL_YIELD_THRESHOLD 100
+#define STATE_NORMAL 0
+#define STATE_UPDATING 1
+#define VERSION_CODE 0
 #define DISPLAY_WIDTH 64
 #define DISPLAY_HEIGHT 32
+#define SERVE_PROGMEM_IMAGES true
+
 #pragma endregion
 
 TimeChangeRule EDT = {"EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
@@ -71,7 +90,6 @@ std::map<std::string, Timezone *> timezones = {{"eastern",  &Eastern},
 #define PxMATRIX_MAX_WIDTH DISPLAY_WIDTH
 
 #include <PxMatrix.h>
-//#include <CustomPxMatrix.h>
 
 #ifdef ESP32
 
@@ -218,6 +236,10 @@ struct Widget {
     uint16_t id; // The id for the widget
     uint8_t type; // The type of widget
     std::string content; // The filename for the image, for instance
+    std::string source; // A data string for storing content such as API responses for rendering
+    uint8_t contentType; // Extra information about the content
+    std::string auth; // Authorization string for requests
+    std::vector<std::string> args; // Arguments for parsing of JSON response, for instance
     uint8_t xOff; // The X offset for the widget
     uint8_t yOff; // The Y offset for the widget
     uint8_t width; // The width of the widget
@@ -233,7 +255,14 @@ struct Widget {
     bool background; // Whether the widget exists in the background or not
     ulong lastUpdate; // When the widget was last updated
     uint8_t state; // The animation frame, for instance
-    bool dirty;
+    bool dirty; // Whether a refresh is queued
+};
+
+struct FSImage {
+    uint8_t width;
+    uint8_t height;
+    uint8_t length;
+    uint8_t type;
 };
 
 struct ProgmemImage {
@@ -261,64 +290,73 @@ String weatherKey;
 String weatherLocation;
 
 // State values
+uint8_t state;
 long weatherUpdateTime;
 uint16_t weatherID = 200;
 bool needsConfig; // If a configuration is needed
 bool needsUpdate; // If a full update is needed
 std::vector <uint16_t> backgroundBuffer;
+uint8_t theHour12;
 uint8_t theHour;
 uint8_t theMinute;
+time_t bootTime;
 
 DoubleResetDetector drd(10, 0);
 ESP8266WebServer *server;
+ESP8266HTTPUpdateServer updateServer(true);
 NTPClient *ntpClient;
-OpenWeatherMapForecast client;
+OpenWeatherMapForecast weatherClient;
 DisplayBuffer *displayBuffer;
-\
 
 #pragma region Configuration
 
 void writeDefaultConfig() {
-    File file = SPIFFS.open("/config.json", "w");
+    File file = LittleFS.open("/config.json", "w");
     file.print(
-            "{\"widgets\":[{\"id\":0,\"type\":0,\"xOff\":0,\"yOff\":0,\"width\":64,\"height\":32,\"content\":\"blm\",\"disabled\":false,\"background\":true,\"frequency\":10000,\"length\":2},{\"id\":1,\"type\":4,\"xOff\":33,\"yOff\":15,\"width\":29,\"height\":7,\"content\":\"ABCDEFG\",\"colors\":[14304],\"disabled\":false,\"transparent\":false,\"backgroundColor\":63488,\"bordered\":true,\"borderColor\":63488},{\"id\":2,\"type\":7,\"xOff\":29,\"yOff\":2,\"width\":12,\"height\":7,\"disabled\":false,\"frequency\":1000,\"transparent\":false,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":3,\"type\":6,\"xOff\":1,\"yOff\":23,\"width\":61,\"height\":9,\"content\":\"ABCDEFGHIJ\",\"colors\":[14304],\"disabled\":false,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":4,\"type\":3,\"xOff\":46,\"yOff\":0,\"width\":15,\"height\":15,\"colors\":[10000, 20000, 2042],\"disabled\":false,\"frequency\":60000,\"bordered\":true,\"borderColor\":63488,\"backgroundColor\":0},{\"id\":5,\"type\":8,\"xOff\":1,\"yOff\":11,\"width\":31,\"height\":9,\"colors\":[14304],\"disabled\":false,\"frequency\":1000,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":5,\"type\":2,\"xOff\":2,\"yOff\":2,\"width\":21,\"height\":7,\"colors\":[2042],\"disabled\":false,\"frequency\":1000,\"backgroundColor\":0,\"bordered\":true,\"borderColor\":63488},{\"id\":10,\"type\":0,\"xOff\":15,\"yOff\":0,\"width\":25,\"height\":30,\"content\":\"taz1\",\"disabled\":false,\"background\":false,\"frequency\":10000,\"length\":1}],\"brightnessMode\":1,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":0,\"timezone\":\"eastern\",\"metric\":false,\"weatherKey\":\"\",\"weatherLocation\":\"5014227\",\"transparency\":true}");
+            "{\"widgets\":[{\"id\":0,\"type\":0,\"xOff\":0,\"yOff\":0,\"width\":64,\"height\":32,\"content\":\"blm\",\"disabled\":false,\"background\":true,\"frequency\":0,\"length\":1},{\"id\":1,\"type\":4,\"xOff\":33,\"yOff\":15,\"width\":29,\"height\":7,\"content\":\"ABCDEFG\",\"colors\":[\"0x00FFF5\"],\"disabled\":true,\"transparent\":false,\"backgroundColor\":\"0x000000\",\"bordered\":true,\"borderColor\":\"0xFF0000\"},{\"id\":2,\"type\":7,\"xOff\":47,\"yOff\":25,\"width\":12,\"height\":7,\"disabled\":false,\"frequency\":1000,\"transparent\":false,\"backgroundColor\":\"0x000000\",\"bordered\":true,\"borderColor\":\"0xFF0000\"},{\"id\":3,\"type\":6,\"xOff\":1,\"yOff\":23,\"width\":61,\"height\":9,\"content\":\"ABCDEFGHIJ\",\"colors\":[\"0x3BFF00\"],\"disabled\":true,\"backgroundColor\":\"0x000000\",\"bordered\":true,\"borderColor\":\"0xFF0000\"},{\"id\":4,\"type\":3,\"xOff\":46,\"yOff\":0,\"width\":15,\"height\":15,\"colors\":[\"0x001DFF\", \"0x00FFF5\", \"0x3BFF00\"],\"disabled\":false,\"frequency\":60000,\"bordered\":true,\"borderColor\":\"0xFF0000\",\"backgroundColor\":\"0x000000\"},{\"id\":5,\"type\":8,\"xOff\":1,\"yOff\":11,\"width\":31,\"height\":9,\"colors\":[\"143040\"],\"disabled\":true,\"frequency\":1000,\"backgroundColor\":\"0x000000\",\"bordered\":true,\"borderColor\":\"0xFF0000\"},{\"id\":5,\"type\":2,\"contentType\":0,\"xOff\":42,\"yOff\":16,\"width\":21,\"height\":7,\"colors\":[\"0x00FFF5\"],\"disabled\":false,\"frequency\":1000,\"backgroundColor\":\"0x000000\",\"bordered\":true,\"borderColor\":\"0xFF0000\"},{\"id\":10,\"type\":0,\"xOff\":15,\"yOff\":0,\"width\":25,\"height\":30,\"content\":\"taz1\",\"disabled\":true,\"background\":false,\"frequency\":10000,\"length\":1},{\"id\":13,\"type\":5,\"xOff\":1,\"yOff\":23,\"width\":20,\"height\":7,\"source\":\"http://10.0.0.66:8123/api/states/light.light_bulb\",\"args\":[\"state\"],\"contentType\":0,\"auth\":\"Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJlMDk1OTQzZjhmMDE0OWE0YTJlZmQ1MWJkMjQzYjQ2OCIsImlhdCI6MTU5ODI1NDIyOSwiZXhwIjoxOTEzNjE0MjI5fQ.4pjhwKNDcJDdhcgsMe90fZjgNkfPDkaGjky61xupFw8\",\"colors\":[\"0x3BFF00\"],\"disabled\":true,\"backgroundColor\":\"0x000000\",\"bordered\":true,\"borderColor\":\"0xFF0000\",\"frequency\":10000}],\"brightnessMode\":1,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":\"0x000000\",\"timezone\":\"eastern\",\"metric\":false,\"weatherKey\":\"\",\"weatherLocation\":\"5014227\"}");
     file.close();
 }
 
-bool parseConfig(char data[]) {
+uint16_t parseHexColorString(std::string s) {
+    uint offset = s.substr(0, 2) == "0x" ? 2 : 0;
+    if (s.length() - offset < 6) {
+        Serial.print("Invalid HEX format: ");
+        Serial.println(s.c_str());
+        return 0;
+    }
+    return display.color565(strtoul(s.substr(offset, 2).c_str(), NULL, 16), strtoul(s.substr(offset + 2, 2).c_str(), NULL, 16), strtoul(s.substr(offset + 4, 2).c_str(), NULL, 16));
+}
+
+bool parseConfig(char data[], String* errorString, bool writeConfig) {
     Serial.print("Attempting to parse config: ");
     Serial.println(data);
 
-    DynamicJsonDocument doc(JSON_BUFFER_SIZE);
+    DynamicJsonDocument doc(CONFIG_JSON_BUFFER_SIZE);
     DeserializationError error = deserializeJson(doc, data);
     if (error) {
-        Serial.print("Failed to deserialize config file: ");
-        Serial.println(error.c_str());
+        errorString->concat("Failed to deserialize config file: ");
+        errorString->concat(error.c_str());
         return false;
     }
 
-    uint16_t tempBackgroundColor = doc["backgroundColor"];
+    uint16_t tempBackgroundColor = doc["backgroundColor"].isNull() ? 0 : parseHexColorString(doc["backgroundColor"].as<char *>());
     String tempWeatherKey = doc["weatherKey"].isNull() ? "" : String(doc["weatherKey"].as<char *>());
     String tempWeatherLocation = doc["weatherLocation"].isNull() ? "" : String(doc["weatherLocation"].as<char *>());
     bool tempMetric = doc["metric"];
-    bool tempTransparency = doc["transparency"];
+    bool tempTransparency = false;
     std::string tempTimezone = doc["timezone"].isNull() ? "eastern" : std::string(doc["timezone"].as<char *>());
     if (timezones.count(tempTimezone) == 0) {
-        Serial.println("Invalid timezone");
+        errorString->concat("Invalid timezone");
         return false;
     }
 
-    if (doc["brightnessMode"].isNull() || doc["brightnessUpper"].isNull() || doc["brightnessLower"].isNull()) {
-        Serial.println("Missing brightness key in config file");
-        return false;
-    }
     uint8_t tempBrightnessMode = doc["brightnessMode"];
     uint8_t tempBrightnessLower = doc["brightnessLower"];
-    uint8_t tempBrightnessUpper = doc["brightnessUpper"];
+    uint8_t tempBrightnessUpper = doc["brightnessUpper"].isNull() ? 255 : doc["brightnessUpper"];
 
     JsonArray configWidgets = doc["widgets"];
     if (!configWidgets) {
-        Serial.println("Missing widgets key in config file");
+        errorString->concat("Missing widgets key in config file");
         return false;
     }
     bool tempUsingWeather;
@@ -327,7 +365,8 @@ bool parseConfig(char data[]) {
         JsonObject widget = configWidgets[i];
         if (!widget || widget["id"].isNull() || widget["type"].isNull() || widget["xOff"].isNull() ||
             widget["yOff"].isNull() || widget["width"].isNull() || widget["height"].isNull()) {
-            Serial.printf("Failed to parse widget %i in list\n", i);
+            errorString->concat("Failed to parse widget ");
+            errorString->concat(i);
             return false;
         }
         if (widget["disabled"])
@@ -335,39 +374,48 @@ bool parseConfig(char data[]) {
         if (widget["type"] == WIDGET_WEATHER_ICON)
             tempUsingWeather = true;
 
+        if (widget["transparent"])
+            tempTransparency = true;
+
+        JsonArray a = widget["args"];
+        Serial.println();
+        std::vector <std::string> args;
+        for (uint i = 0; i < a.size(); i++)
+            args.push_back(a[i].isNull() ? "" : a[i].as<char *>());
+
         std::vector <uint16_t> colors;
         JsonArray c = widget["colors"];
         switch (widget["type"].as<uint8_t>()) {
             case WIDGET_ANALOG_CLOCK:
                 if (c.size() < 3) {
-                    Serial.println("Analog clocks require 2 color arguments");
+                    errorString->concat("Analog clocks require 2 color arguments");
                     return false;
                 }
                 break;
             case WIDGET_CLOCK:
                 if (c.size() < 1) {
-                    Serial.println("Digital clocks require 1 color argument");
+                    errorString->concat("Digital clocks require 1 color argument");
                     return false;
                 }
                 break;
             case WIDGET_TEXT_BIG:
             case WIDGET_TEXT:
                 if (c.size() < 1) {
-                    Serial.println("Text require 1 color argument");
+                    errorString->concat("Text require 1 color argument");
                     return false;
                 }
                 break;
             default:
                 break;
         }
-        for (uint i = 0; i < c.size(); i++)
-            colors.push_back(c[i]);
+        for (uint i = 0; i < c.size(); i++) 
+            colors.push_back(parseHexColorString(std::string(c[i].as<char*>())));
 
         tempWidgets.push_back({widget["id"], widget["type"],
-                               widget["content"].isNull() ? "" : std::string(widget["content"].as<char *>()),
+                               widget["content"].isNull() ? "" : std::string(widget["content"].as<char *>()), widget["source"].isNull() ? "" : std::string(widget["source"].as<char *>()), widget["contentType"],widget["auth"].isNull() ? "" : std::string(widget["auth"].as<char *>()),args,
                                widget["xOff"], widget["yOff"], widget["width"], widget["height"], widget["frequency"],
-                               widget["offset"], widget["length"], colors, widget["bordered"], widget["borderColor"],
-                               widget["transparent"], widget["backgroundColor"].as<uint16_t>(), widget["background"]});
+                               widget["offset"], widget["length"], colors, widget["bordered"], widget["borderColor"].isNull() ? 0 : parseHexColorString(widget["borderColor"].as<char *>()),
+                               widget["transparent"], widget["backgroundColor"].isNull() ? 0 : parseHexColorString(widget["backgroundColor"].as<char *>()), widget["background"]});
     }
     std::sort(tempWidgets.begin(), tempWidgets.end(), [](Widget w1, Widget w2) { return w1.id < w2.id; });
 
@@ -386,6 +434,12 @@ bool parseConfig(char data[]) {
     metric = tempMetric;
     usingTransparency = tempTransparency;
 
+    if (writeConfig) {
+        File file = LittleFS.open("/config.json", "w");
+        file.print(data);
+        file.close();
+    }
+
     // Transparency uses about an extra 4KB
     if (usingTransparency && displayBuffer == nullptr) {
         Serial.println("Creating display buffer for transparency...");
@@ -402,7 +456,7 @@ bool parseConfig(char data[]) {
 }
 
 bool getConfig() {
-    File configFile = SPIFFS.open("/config.json", "r");
+    File configFile = LittleFS.open("/config.json", "r");
     if (!configFile) {
         Serial.println("Failed to open config file");
         return false;
@@ -423,8 +477,9 @@ bool getConfig() {
     configFile.readBytes(buf.get(), size);
     configFile.close();
 
-    if (!parseConfig(buf.get())) {
-        Serial.println("Failed to parse config, replacing with default...");
+    String error;
+    if (!parseConfig(buf.get(), &error, false)) {
+        Serial.printf("Failed to parse config: %s\n, replacing with default...\n", error.c_str());
         writeDefaultConfig();
         return false;
     }
@@ -433,6 +488,10 @@ bool getConfig() {
 }
 
 #pragma endregion
+
+void queueFullUpdate() {
+    needsUpdate = true;
+}
 
 #pragma region Web Server
 
@@ -457,9 +516,11 @@ String getContentType(String filename) {
 bool sendFile(String path) {
     if (path.endsWith("/"))
         return false;
+    String existpath = path + (LittleFS.exists(path + ".gz") ? ".gz" : "");
+    Serial.printf("Serving: %s, %i\n", existpath.c_str(), LittleFS.exists(path));
     String contentType = getContentType(path);
-    if (SPIFFS.exists(path)) {
-        File file = SPIFFS.open(path, "r");
+    if (LittleFS.exists(existpath)) {
+        File file = LittleFS.open(existpath, "r");
         server->streamFile(file, contentType);
         file.close();
         return true;
@@ -474,16 +535,23 @@ void serveRoot() {
 void serveConfig() {
     if (server->method() == HTTP_POST) {
         std::unique_ptr<char[]> buf(new char[MAX_CONFIG_FILE_SIZE]);
-        String jsonString = server->arg("config");
+        
+        String jsonString = server->arg("plain");
         if (jsonString.length() > MAX_CONFIG_FILE_SIZE) {
             server->send(400, "text/html", "Config file is too large");
             return;
         }
         jsonString.toCharArray(buf.get(), MAX_CONFIG_FILE_SIZE);
-        if (parseConfig(buf.get()))
+        String error;
+        if (parseConfig(buf.get(), &error, true)) {
+
             Serial.println("Successfully updated config file");
-        else
-            Serial.println("Failed to update config file");
+            server->send(200);
+        }
+        else {
+            Serial.printf("Failed to update config file: %s\n", error.c_str());
+            server->send(400, "text/plain", error);
+        }
     } else {
         if (!sendFile("/config.json")) {
             writeDefaultConfig();
@@ -492,13 +560,274 @@ void serveConfig() {
     }
 }
 
+void serveFullUpdate() {
+    queueFullUpdate();
+    server->send(200);
+}
+
 void serveNotFound() {
     if (!sendFile(server->uri()))
         server->send(404, "text/html", "Not found");
 }
 
+void serveRestart() {
+    server->send(200);
+    delay(2000);
+    ESP.restart();
+}
+
+void startOTA() {
+    state = STATE_UPDATING;
+    LittleFS.end();
+    server->send(200, "text/plain", "");
+}
+
+void serveStats() {
+    StaticJsonDocument<200> doc;
+    doc["uptime"] = ntpClient->getRawTime() - bootTime;
+    doc["resetReason"] = ESP.getResetReason().c_str();
+    doc["version"] = VERSION_CODE;
+    doc["fragmentation"] = ESP.getHeapFragmentation();
+    doc["memoryFree"] = ESP.getFreeHeap();
+    doc["width"] = DISPLAY_WIDTH;
+    doc["height"] = DISPLAY_HEIGHT;
+    std::unique_ptr<char[]> buf(new char[200]);
+    serializeJson(doc, buf.get(), 200);
+    server->send(200, "text/json", buf.get());
+}
+
+/*uint8_t getDirectoryFileCount(Dir& dir) {
+    uint8_t count;
+    while(dir.next()) 
+        count++;
+    return count;
+}*/
+
+void writeDefaultImageData() {
+    File dataFile = LittleFS.open("/imageData.json", "w");
+    dataFile.write("{}");
+    dataFile.close();
+}
+
+std::map<std::string, FSImage> getFSImageData() {
+    std::map<std::string, FSImage> data;
+
+    File dataFile = LittleFS.open("/imageData.json", "r");
+    if (!dataFile) {
+        Serial.println("Failed to open image data file, writing default");
+        writeDefaultImageData();
+        dataFile = LittleFS.open("/imageData.json", "r");
+    }
+
+    size_t size = dataFile.size();
+    if (size > MAX_IMAGE_DATA_FILE_SIZE) {
+        Serial.printf("Image data file size is too large(%i), replacing with default...\n", size);
+        dataFile.close();
+        writeDefaultImageData();
+        dataFile = LittleFS.open("/imageData.json", "r");
+    }
+
+    std::unique_ptr<char[]> buf(new char[size]);
+
+    dataFile.readBytes(buf.get(), size);
+    dataFile.close();
+
+    DynamicJsonDocument doc(IMAGE_JSON_BUFFER_SIZE);
+    deserializeJson(doc, buf.get());
+    for(auto const& entry : doc.as<JsonObject>()) 
+        data[entry.key().c_str()] = {entry.value()["width"], entry.value()["height"], entry.value()["length"], entry.value()["type"]};
+
+    return data;
+}
+
+void writeFSImageData(std::map<std::string, FSImage> data) {
+    File dataFile = LittleFS.open("/imageData.json", "w");
+    DynamicJsonDocument doc(IMAGE_JSON_BUFFER_SIZE);
+    for(auto const& entry : data) {
+        JsonObject o = doc.createNestedObject(entry.first.c_str());
+        o["width"] = entry.second.width;
+        o["height"] = entry.second.height;
+        o["length"] = entry.second.length;
+        o["type"] = entry.second.type;
+    }
+    std::unique_ptr<char[]> buf(new char[MAX_IMAGE_DATA_FILE_SIZE]);
+    serializeJson(doc, buf.get(), MAX_IMAGE_DATA_FILE_SIZE);
+    dataFile.write(buf.get());
+    dataFile.close();
+}
+
+Dir getImageDir() {
+    if (!LittleFS.exists("/images"))
+        LittleFS.mkdir("/images");
+    return LittleFS.openDir("/images");
+}
+
+void serveImageData() {
+    Dir imageDir = getImageDir();
+    std::map<std::string, FSImage> fsImageData = getFSImageData();
+    
+    size_t size = 20 + (progmemImages.size() + fsImageData.size()) * 100;
+    DynamicJsonDocument doc(size);
+    
+    if (SERVE_PROGMEM_IMAGES)
+        for(auto const& entry : progmemImages) {
+            //if (entry.second.type != IMAGE_GIMP)
+            //    continue;
+            JsonObject o = doc.createNestedObject(String(entry.first.c_str()) + "_P");
+            o["width"] = entry.second.width;
+            o["height"] = entry.second.height;
+            o["length"] = entry.second.length;
+            o["type"] = entry.second.type;
+            //doc[String(entry.first.c_str()) + "_P"] = o;
+            //doc.add(String(entry.first.c_str()) + "_P");
+        }
+
+    for(auto const& entry : fsImageData) {
+        JsonObject o = doc.createNestedObject(entry.first.c_str());
+        o["width"] = entry.second.width;
+        o["height"] = entry.second.height;
+        o["length"] = entry.second.length;
+        o["type"] = entry.second.type;
+    }
+
+    std::unique_ptr<char[]> buf(new char[size]);
+    serializeJson(doc, buf.get(), size);
+    server->send(200, "text/json", buf.get());
+}
+
+void uploadImage() {
+    Serial.printf("NAME: %s\n", server->arg("name").c_str());
+        static File fsUploadFile;
+        HTTPUpload& upload = server->upload();
+        if (upload.status == UPLOAD_FILE_START){
+            String filename = "/images/" + server->arg("name");
+            Serial.printf("Uploading image: %s\n", filename.c_str());
+            fsUploadFile = LittleFS.open(filename, "w");            
+        } else if (upload.status == UPLOAD_FILE_WRITE){
+            if (fsUploadFile)
+                fsUploadFile.write(upload.buf, upload.currentSize);
+        } else if (upload.status == UPLOAD_FILE_END){
+            if (fsUploadFile) {
+                fsUploadFile.close();
+                std::map<std::string, FSImage> fsImageData = getFSImageData();    
+                fsImageData[server->arg("name").c_str()] = {strtoul(server->arg("width").c_str(), NULL, 10), strtoul(server->arg("height").c_str(), NULL, 10), strtoul(server->arg("length").c_str(), NULL, 10), strtoul(server->arg("type").c_str(), NULL, 10)};
+                writeFSImageData(fsImageData);
+                Serial.print("Image Size: "); 
+                Serial.println(upload.totalSize);
+                //server->send(200);
+            } else {
+                String filename = "/images/" + server->arg("name");
+                if (LittleFS.exists(filename))
+                    LittleFS.remove(filename);
+                //server->send(500, "text/plain", "500: couldn't save image");
+            }
+        }
+}
+
+void serveImage() {
+    String image = server->arg("image");
+    if (image.endsWith("_P")) {
+        std::string progmem = std::string(image.substring(0, image.length() - 2).c_str());
+        if (progmemImages.count(progmem) < 1) {
+            server->send(404);
+            return;
+        }
+
+        /*if (!LittleFS.exists("/prog"))
+            LittleFS.mkdir("/prog");
+
+        String progPath = "/prog/" + image;
+        if (LittleFS.exists(progPath))
+            LittleFS.remove(progPath);
+        File file = LittleFS.open(progPath, "w");
+        uint size = (progmemImages[progmem].type == IMAGE_GIMP ? 4 : 2) * progmemImages[progmem].width * progmemImages[progmem].height * progmemImages[progmem].length;
+        file.printf_P((PGM_P)progmemImages[progmem].data);
+        for (uint i = 0; i < size; i++) {
+            file.write(pgm_read_word_near((uint8_t*)progmemImages[progmem].data + i));
+        }
+        file.close();
+        file = LittleFS.open(progPath, "r");
+        //sendFile(progPath);
+        server->sendHeader("Content-Description", "File Transfer");
+        server->sendHeader("Content-Transfer-Encoding", "binary");
+        server->streamFile(file, "application/binary");
+        file.close();*/
+
+        uint size = (progmemImages[progmem].type == IMAGE_GIMP ? 4 : 2) * progmemImages[progmem].width * progmemImages[progmem].height * progmemImages[progmem].length;
+        /*
+        //server->sendHeader("Content-Length", (String)size);
+        //server->send(200);
+        //server->sendContent_P((PGM_P)progmemImages[progmem].data, size);*/
+        server->sendHeader("Content-Description", "File Transfer");
+        server->sendHeader("Content-Transfer-Encoding", "binary");
+        server->send_P(200, "application/binary", (PGM_P)progmemImages[progmem].data, size);
+    } else {
+        if (!sendFile("/images/" + image)) {
+            Serial.printf("Image doesn't exist %s\n", image.c_str());
+            server->send(404);
+        }
+    }
+}
+
+void serveOK() {
+  server->send(200);
+}
+
+void serveDeleteImage() {
+    std::string name = server->arg("name").c_str();
+    std::map<std::string, FSImage> fsImageData = getFSImageData();    
+    fsImageData.erase(name);
+    std::string filename = "/images/" + name;
+    if (LittleFS.exists(filename.c_str()))
+        LittleFS.remove(filename.c_str());
+    writeFSImageData(fsImageData);
+    server->send(200);
+}
+
+void serveDeleteAllImages() {
+    writeDefaultImageData();
+    Dir dir = getImageDir();
+    LittleFS.rmdir("/images");
+    LittleFS.mkdir("/images");
+    std::vector<String> files;
+    while(dir.next()) {
+        Serial.println(dir.fileName().c_str());
+        files.push_back(dir.fileName());
+    }
+    for (const auto& file: files) 
+        LittleFS.remove("/images/" + file);
+    server->send(200);
+}
+
 void uploadFile() {
 
+}
+
+void setupWebserver() {
+    server = new ESP8266WebServer(80);
+    server->on("/", serveRoot);
+    /*server->on("/update", HTTP_OPTIONS, []() {
+        server->sendHeader("Access-Control-Max-Age", "10000");
+        server->sendHeader("Access-Control-Allow-Methods", "POST,GET,OPTIONS");
+        server->sendHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+        server->send(200, "text/plain", "");
+    });*/
+    updateServer.setup(server);
+    
+    server->on("/config", serveConfig);
+    server->on("/beginUpdate", startOTA);
+    server->on("/fullRefresh", serveFullUpdate);
+    server->on("/restart", serveRestart);
+    server->on("/stats", serveStats);
+    server->on("/uploadImage", HTTP_POST, serveOK, uploadImage);
+    server->on("/image", HTTP_GET, serveImage);
+    server->on("/images", serveImageData);
+    server->on("/deleteImage", serveDeleteImage);
+    server->on("/deleteAllImages", serveDeleteAllImages);
+    //server->onFileUpload(uploadFile);
+    server->onNotFound(serveNotFound);
+    Serial.println("Starting configuration webserver...");
+    server->begin();
 }
 
 #pragma endregion
@@ -537,13 +866,13 @@ void drawImageUint16(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t 
 
 void drawImageFsUint8(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset,
                       const char name[]) {
-    if (!SPIFFS.exists(name)) {
+    if (!LittleFS.exists(name)) {
         Serial.print("Couldn't find image to draw for: ");
         Serial.println(name);
         return;
     }
 
-    File file = SPIFFS.open(name, "r");
+    File file = LittleFS.open(name, "r");
     char line_buffer[width * 2];
     for (uint8_t y = 0; y < height; y++) {
         file.seek(offset * width * height * 2 + y * width * 2);
@@ -555,7 +884,7 @@ void drawImageFsUint8(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t
     }
 }
 
-inline void
+void
 drawGimpImage(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, uint8_t height, char *data) {
     for (uint y = 0; y < height; y++) {
         for (uint x = 0; x < width; x++) {
@@ -577,7 +906,7 @@ drawGimpImage(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, 
 void drawAnalogClock(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t radius, uint16_t colorMinute,
                      uint16_t colorHour, uint16_t colorMarking) {
     double minAngle = 2 * PI * (theMinute / 60. - .25);
-    double hourAngle = 2 * PI * (theHour / 12. + theMinute / 720. - .25);
+    double hourAngle = 2 * PI * (theHour12 / 12. + theMinute / 720. - .25);
     for (uint i = 0; i < 12; i++) {
         double angle = 2 * PI * i / 12.;
         d.drawPixel(xOffset + round(cos(angle) * radius), yOffset + round(sin(angle) * radius), colorMarking);
@@ -590,15 +919,18 @@ void drawAnalogClock(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t 
                yOffset + round(sin(hourAngle) * radius * .5), colorHour);
 }
 
-const char *getTimeText() {
+const char *getTimeText(uint8_t type) {
     std::string text;
-    if (theHour < 10)
-        text.append("0");
-    text.append(dtostrf(theHour, theHour < 10 ? 1 : 2, 0, " "));
+    uint8_t hourValue = type == CLOCK_TYPE_24 ? theHour : theHour12;
+    if (hourValue < 10)
+        text += "0";
+    text.append(dtostrf(hourValue, hourValue < 10 ? 1 : 2, 0, " "));
     text.append(":");
     if (theMinute < 10)
         text.append("0");
-    text.append(dtostrf(theMinute, theMinute < 10 ? 1 : 2, 0, " "));
+    text += dtostrf(theMinute, theMinute < 10 ? 1 : 2, 0, " ");
+    if (type == CLOCK_TYPE_12_PERIOD)
+        text += theHour < 12 ? "AM" : "PM";
     return text.c_str();
 }
 
@@ -606,6 +938,116 @@ void drawBigText(Adafruit_GFX &d, const char *text, uint8_t xOffset, uint8_t yOf
     d.setTextColor(color);
     d.setCursor(xOffset, yOffset);
     d.print(text);
+}
+
+bool sendGetRequest(std::string url, std::string auth, std::string& result) {
+    //Serial.printf("Sending GET request: %s\n", url.c_str());
+    //Serial.printf("Auth: %s\n", auth.c_str());
+    if (!WiFi.isConnected()) {
+        Serial.println("Wifi isn't connected");
+        return false;
+    }
+
+    WiFiClient wifiClient;
+    std::string theHost = "10.0.0.66";
+    if (!wifiClient.connect(theHost.c_str(), 8123)) {
+        Serial.println("Failed to connect");
+        return false;
+    }
+    std::string theUrl = "/api/states/light.light_bulb";
+    wifiClient.print(("GET " + theUrl + " HTTP/1.1\r\n" +
+               "Host: " + theHost + "\r\n" +
+               "Authorization: " + auth + "\r\n" +
+               //"User-Agent: BuildFailureDetectorESP8266\r\n" +
+               "Connection: close\r\n\r\n").c_str());
+
+    //Serial.println("Request sent");
+    bool headers = false;
+    while (wifiClient.connected()) {
+        String line = wifiClient.readStringUntil('\n');
+        //Serial.println(line);
+        if (line == "\r") {
+            //Serial.println("Headers received");
+            headers = true;
+            break;
+        }
+    }
+  //Serial.println("\nResponse End\n");
+    if (!headers) {
+        //Serial.println("Failed to get response body");
+        return false;
+    }
+    String line = wifiClient.readStringUntil('\n');
+    //Serial.println(line.c_str());
+    //return std::string(line.c_str());
+    result += line.c_str();
+    return true;
+    /*HTTPClient httpClient;
+    //httpClient.setTimeout(60000);
+    if (httpClient.begin(wifiClient, url.c_str())) {
+    //httpClient.setAuthorization(auth.c_str());
+    httpClient.addHeader("Authorization", ("Bearer " + auth).c_str());
+    int code = httpClient.GET();
+    if (code == HTTP_CODE_OK) {
+        String payload = httpClient.getString();
+        Serial.println(payload); 
+    } else {
+      Serial.printf("[HTTP] GET... failed, error: %i, %s\n", code, httpClient.errorToString(code).c_str());
+    }
+    
+    } else {
+        Serial.println("Failed to connect to endpoint");
+    }
+    httpClient.end();*/
+}
+
+const char* jsonVariantToString(JsonVariant& variant, uint8_t type) {
+    switch (type) {
+        case JSON_TYPE_STRING:
+            return variant.as<char *>();
+        case JSON_TYPE_LONG:
+            return String(variant.as<long>(), 10).c_str();
+        case JSON_TYPE_BOOL:
+            return (variant ? "True" : "False");
+        default:
+            Serial.printf("Unknown JSON_TYPE: %i\n", type);
+            return "";
+        }
+}
+
+void updateTextGETWidgetJson(Widget &widget) {
+    std::string data;
+    if (!sendGetRequest(widget.content, widget.auth, data))
+        return;
+    DynamicJsonDocument doc(CONFIG_JSON_BUFFER_SIZE);
+    DeserializationError error = deserializeJson(doc, data);
+    if (error) {
+        Serial.print("Failed to deserialize response data: ");
+        Serial.println(error.c_str());
+        widget.content = "ERROR";
+    } else {
+        JsonVariant current = doc[widget.args[0].c_str()];
+        for (uint i = 1; i < widget.args.size(); i++) {
+            if (current[widget.args[i].c_str()].isNull()) {
+                Serial.printf("Failed to parse JSON with key: %s\n", widget.args[i].c_str());
+                return;
+            }
+            current = current[widget.args[i].c_str()];
+        }
+        String s = String(jsonVariantToString(current, widget.contentType));
+        s.toUpperCase();
+        widget.content = std::string(s.c_str());
+    }
+}
+
+void updateTextGETWidget(Widget &widget) {
+    std::string data;
+    if (!sendGetRequest(widget.content, widget.auth, data))
+        return;
+    String s = String(data.c_str());
+    s.toUpperCase();
+    widget.content = std::string(s.c_str());
+    widget.dirty = true;
 }
 
 void incrementWidgetState(Widget &widget, uint8_t max) {
@@ -620,14 +1062,26 @@ void incrementWidgetState(Widget &widget) {
     incrementWidgetState(widget, widget.length);
 }
 
+void updateClockWidget(Widget &widget) {
+    if (widget.state != theMinute) {
+        widget.state = theMinute;
+        widget.dirty = true;
+    }
+}
+
 void updateWidget(Widget &widget) {
     switch (widget.type) {
         case WIDGET_PROGMEM_IMAGE:
         case WIDGET_FS_IMAGE:
             incrementWidgetState(widget);
             break;
-        case WIDGET_TEXT_REST:
-
+        case WIDGET_TEXT_GET_JSON_BIG:
+        case WIDGET_TEXT_GET_JSON:
+            updateTextGETWidgetJson(widget);
+            break;
+        case WIDGET_TEXT_GET:
+        case WIDGET_TEXT_GET_BIG:
+            updateTextGETWidget(widget);
             break;
         case WIDGET_WEATHER_ICON:
             incrementWidgetState(widget, 5);
@@ -635,18 +1089,19 @@ void updateWidget(Widget &widget) {
         case WIDGET_CLOCK:
         case WIDGET_CLOCK_BIG:
         case WIDGET_ANALOG_CLOCK:
+            updateClockWidget(widget);
         case WIDGET_TEXT_BIG:
         case WIDGET_TEXT:
             break;
         default:
-            Serial.print("Invalid widget type: ");
+            Serial.print("Invalid widget type to update: ");
             Serial.println(widget.type);
             break;
     }
 
     if (widget.background)
-        needsUpdate = true;
-    widget.lastUpdate = millis();
+        queueFullUpdate();
+    widget.lastUpdate = millis() + (widget.lastUpdate == 0 ? random(0, 20) : 0);
 }
 
 void updateWidgets() {
@@ -696,29 +1151,30 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
             break;
         case WIDGET_FS_IMAGE:
             drawImageFsUint8(d, widget.xOff, widget.yOff, widget.width, widget.height, widget.state + widget.offset,
-                             widget.content.c_str());
+                            ("/images/" + widget.content).c_str());
             break;
         case WIDGET_CLOCK:
-            TFDrawText(d, getTimeText(), widget.xOff + (widget.width - (TF_COLS + 1) * 5 + 1) / 2,
+            TFDrawText(d, getTimeText(widget.contentType), widget.xOff + (widget.width - (TF_COLS + 1) * 5 + 1) / 2,
                        widget.yOff + (widget.height - TF_ROWS) / 2, widget.colors[0], true, 0);
             break;
         case WIDGET_CLOCK_BIG:
-            drawBigText(d, getTimeText(), widget.xOff + (widget.width - 29) / 2, widget.yOff + (widget.height - 6) / 2,
+            drawBigText(d, getTimeText(widget.contentType), widget.xOff + (widget.width - 29) / 2, widget.yOff + (widget.height - 6) / 2,
                         widget.colors[0]);
             break;
         case WIDGET_ANALOG_CLOCK:
             drawAnalogClock(d, widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2 - (widget.bordered ? 1 : 0), widget.colors[0], widget.colors[1], widget.colors[2]);
             break;
+        case WIDGET_TEXT_GET_JSON:
+        case WIDGET_TEXT_GET:
         case WIDGET_TEXT:
             TFDrawText(d, widget.content.c_str(),
-                       widget.xOff + (widget.width - (TF_COLS + 1) * widget.content.length() + 1) / 2,
+                       widget.xOff + _max(0, (widget.width - (TF_COLS + 1) * (int)widget.content.length() + 1) / 2),
                        widget.yOff + (widget.height - TF_ROWS) / 2, widget.colors[0], true, 0);
             break;
-        case WIDGET_TEXT_REST:
-
-            break;
+        case WIDGET_TEXT_GET_JSON_BIG:
+        case WIDGET_TEXT_GET_BIG:
         case WIDGET_TEXT_BIG:
-            drawBigText(d, widget.content.c_str(), widget.xOff + (widget.width - 6 * widget.content.length() + 1) / 2,
+            drawBigText(d, widget.content.c_str(), widget.xOff + _max(0, (widget.width - 6 * (int)widget.content.length() + 1) / 2),
                         widget.yOff + (widget.height - 7) / 2, widget.colors[0]);
             break;
         case WIDGET_WEATHER_ICON:
@@ -747,8 +1203,7 @@ void drawScreen(Adafruit_GFX &d, bool fullUpdate, bool buffering, bool finalize)
     for (uint i = 0; i < widgets.size(); i++) {
         Widget &widget = widgets[i];
         if (buffering && !widget.background)
-            return; // Background widgets should not come after foreground ones
-        //continue;
+            continue;
 
         if (!fullUpdate && !widget.dirty)
             continue;
@@ -797,13 +1252,13 @@ void handleBrightness() {
 
 void updateWeather() {
     OpenWeatherMapForecastData data[1];
-    client.setMetric(metric);
-    client.setLanguage("en");
+    weatherClient.setMetric(metric);
+    weatherClient.setLanguage("en");
     uint8_t allowedHours[] = {0, 12};
-    client.setAllowedHours(allowedHours, 2);
+    weatherClient.setAllowedHours(allowedHours, 2);
     // See https://docs.thingpulse.com/how-tos/openweathermap-key/
 
-    if (!client.updateForecastsById(data, weatherKey, weatherLocation, 1)) {
+    if (!weatherClient.updateForecastsById(data, weatherKey, weatherLocation, 1)) {
         Serial.println("Failed to update weather info");
         return;
     }
@@ -819,8 +1274,15 @@ void handleWeather() {
     updateWeather();
 }
 
+void updateTime() {
+    ntpClient->update();
+    theHour12 = hourFormat12();
+    theHour = hour();
+    theMinute = minute();
+}
+
 void setup() {
-    Serial.begin(9600);
+    Serial.begin(115200);
     Serial.println();
 
     display.begin(16);
@@ -838,7 +1300,7 @@ void setup() {
     display.showBuffer();
     display.fillScreen(GREEN);
 
-    SPIFFS.begin();
+    LittleFS.begin();
 
     WiFiManager wifiManager;
     wifiManager.setAPCallback(onStartAccessPoint);
@@ -859,17 +1321,11 @@ void setup() {
     Serial.println(WiFi.localIP());
 
     // Webserver
-    server = new ESP8266WebServer(80);
-    server->on("/", serveRoot);
-    server->on("/config", serveConfig);
-    //server->onFileUpload(uploadFile);
-    server->onNotFound(serveNotFound);
-    Serial.println("Starting configuration webserver...");
-    server->begin();
+    setupWebserver();
 
     // Development FS stuff
     writeDefaultConfig();
-    //SPIFFS.remove("/config.json");
+    //LittleFS.remove("/config.json");
 
     if (needsConfig || !getConfig()) {
         display.fillScreen(BLUE);
@@ -887,17 +1343,30 @@ void setup() {
 
     ntpClient = new NTPClient("time.nist.gov", 0, NTP_UPDATE_INTERVAL);
     ntpClient->begin();
+    ntpClient->forceUpdate();
+    bootTime = ntpClient->getRawTime();
     setSyncProvider([]() { return timezones[localTimezone]->toLocal(ntpClient->getRawTime()); });
     setSyncInterval(10);
-    updateWeather();
 }
 
 void loop() {
-    ntpClient->update();
-    theHour = hourFormat12();
-    theMinute = minute();
+    updateTime();
     handleWeather();
     handleBrightness();
-    updateScreen(needsUpdate);
+
+    switch (state) {
+        default:
+        Serial.printf("Unknown state: %i/n", state);
+        case STATE_NORMAL:
+            updateScreen(needsUpdate);
+            break;
+        case STATE_UPDATING:
+            display.fillScreen(BLUE);
+            display.setCursor(0, 0);
+            display.print("Updating, \nDo not \npower off");
+            display.showBuffer();
+            break;
+    }
+
     server->handleClient();
 }

@@ -1,0 +1,29 @@
+{
+  "name": "led-matrix-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "serve": "vue-cli-service serve",
+    "build": "vue-cli-service build"
+  },
+  "dependencies": {
+    "core-js": "^3.6.5",
+    "vue": "^2.6.11",
+    "axios": "^0.20.0",
+    "vue-router": "^3.4.3",
+    "vue-progressbar": "^0.7.5",
+    "vue-material": "latest",
+    "vuex": "^3.5.1",
+    "vue-moment": "^4.1.0",
+    "vuelidate": "~0.7.5",
+    "vue-mobile-detection": "^1.0.0",
+    "mini-css-extract-plugin": "^0.11.0",
+    "vue-json-edit": "^1.4.3"
+  },
+  "devDependencies": {
+    "@vue/cli-plugin-babel": "~4.5.0",
+    "@vue/cli-service": "~4.5.0",
+    "vue-template-compiler": "^2.6.11",
+    "compression-webpack-plugin": "~5.0.1"
+  }
+}
