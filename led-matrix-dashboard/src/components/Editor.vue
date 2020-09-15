@@ -50,13 +50,12 @@ export default {
         this.save(this.jsonData)
     },
     async save(jsonData) {
-      this.$store.commit('set', ['configuration', jsonData])
-      await this.saveConfig()
+      await this.saveConfig(jsonData)
     },
     async reload() {
       this.autoSave = false
       await this.getConfig()
-      this.jsonData = this.$store.state.configuration
+      this.jsonData = this.cloneObject(this.$store.state.configuration)
     }
   },
   async mounted() {

@@ -8,6 +8,7 @@
       </div>
       <div class="fields">
         <md-switch v-model="metric">Metric Units</md-switch>
+        <md-switch v-model="fastUpdate">Fast Update Display</md-switch>
         <md-field>
           <label>WeatherMap API Key</label>
           <md-input v-model="weatherKey"></md-input>
@@ -53,7 +54,6 @@
             <input class="time" v-model="darkTime" type="time">
           </div>
         </div>
-
       </div>
     </md-card>
 
@@ -68,7 +68,7 @@
         :md-active.sync="saveConfirm"
         md-title="Save Settings"
         md-content="Are you sure you want to save the settings?"
-        md-confirm-text="Reload"
+        md-confirm-text="Save"
         md-cancel-text="Cancel"
         @md-confirm="save" />
   </div>
@@ -79,6 +79,7 @@ export default {
   name: "Settings",
   data: () => ({
     metric: false,
+    fastUpdate: false,
     timezone: 'eastern',
     weatherLocation: '',
     weatherKey: '',
@@ -95,6 +96,7 @@ export default {
   },
   methods: {
     async reload() {
+      // Todo: Switch to Display.vue method of configuration copy
       await this.waitForPromiseSuccess(this.getConfig, 500)
       let config = this.$store.state.configuration
       this.metric = config.metric || false
@@ -106,9 +108,10 @@ export default {
       this.brightnessUpper = config.brightnessUpper || 100
       this.brightTime = config.brightTime || '09:00'
       this.darkTime = config.darkTime || '20:30'
+      this.fastUpdate = config.fastUpdate || false
     },
     async save() {
-      let config = this.$store.state.configuration
+      let config = this.cloneObject(this.$store.state.configuration)
       config.metric = this.metric
       config.timezone = this.timezone
       config.weatherLocation = this.weatherLocation
@@ -118,7 +121,8 @@ export default {
       config.brightnessUpper = this.brightnessUpper
       config.brightTime = this.brightTime
       config.darkTime = this.darkTime
-      if (await this.saveConfig())
+      config.fastUpdate = this.fastUpdate
+      if (await this.saveConfig(config))
         ;
       else
         ;

@@ -7,9 +7,12 @@
         </div>
         <div>
           <md-button class="md-accent md-raised" @click="reload(true)">Reload</md-button>
-          <md-button :disabled="$route.params.name.endsWith('_P')" class="md-accent md-raised" @click="saveClick">Save</md-button>
+          <md-button :disabled="$store.state.imageData[$route.params.name].progmem" class="md-accent md-raised" @click="saveConfirm = true">Save</md-button>
           <md-button class="md-accent md-raised" @click="saveAsPrompt = true">Save As</md-button>
           <md-button class="md-accent md-raised" @click="clear">Clear</md-button>
+          <md-button class="md-icon-button" @click="downloadDialog = true">
+            <md-icon>save_alt</md-icon>
+          </md-button>
         </div>
         <div>
           <md-button class="md-icon-button" @click="undo">
@@ -27,19 +30,42 @@
             <md-icon>redo</md-icon>
           </md-button>
         </div>
+        <div>
+          <md-button class="md-icon-button" @click="frameBack">
+            <md-icon>arrow_back</md-icon>
+          </md-button>
+          <md-button class="md-icon-button" @click="frameForward">
+            <md-icon>arrow_forward</md-icon>
+          </md-button>
+        </div>
       </md-card-header>
-      <md-card-content>
-        <canvas @click="click" class="canvas" ref="canvas" :width="canvasWidth" :height="canvasHeight"></canvas>
+      <md-card-content class="canvas">
+        <canvas @click="click" ref="canvas" :width="canvasWidth" :height="canvasHeight"></canvas>
       </md-card-content>
     </md-card>
 
+    <md-dialog :md-active.sync="downloadDialog">
+      <md-dialog-title>Download Image</md-dialog-title>
+      <div>
+        <md-radio v-model.number="downloadType" :value="0">Binary File(Current Frame)</md-radio>
+        <md-radio v-model.number="downloadType" :value="1">Binary File(Entire Image)</md-radio>
+        <md-radio v-model.number="downloadType" :value="2">PNG File</md-radio>
+        <md-radio v-model.number="downloadType" :value="3">JPG File</md-radio>
+        <md-radio v-model.number="downloadType" :value="4">BMP File</md-radio>
+      </div>
+      <md-dialog-actions>
+        <md-button class="md-accent md-raised" @click="downloadDialog = false">Cancel</md-button>
+        <md-button class="md-accent md-raised" @click="download">Download</md-button>
+      </md-dialog-actions>
+    </md-dialog>
     <md-dialog-prompt
         :md-active.sync="saveAsPrompt"
         v-model="saveAsName"
-        md-title="Enter new image name"
+        md-title="Enter name to save as"
         md-input-maxlength="30"
         md-input-placeholder="Enter image name..."
-        md-confirm-text="Done"
+        md-confirm-text="Save"
+        md-cancel-text="Cancel"
         @md-confirm="saveAs"/>
     <md-dialog-confirm
         :md-active.sync="saveConfirm"
@@ -78,7 +104,9 @@ name: "ImageEditor",
     saveAsName: '',
     saveConfirm: false,
     errorAlert: false,
-    errorAlertText: ''
+    errorAlertText: '',
+    downloadDialog: false,
+    downloadType: 0
   }),
   methods: {
     coordsToPixels(x, y) {
@@ -102,6 +130,7 @@ name: "ImageEditor",
       return entry1.x === entry2.x && entry1.y === entry2.y && entry1.colorOld === entry2.colorNew
     },
     click(event) {
+      console.log(event)
       let coords = this.coordsToPixels(event.offsetX, event.offsetY)
       let entry = {x: coords.x, y: coords.y, colorOld: this.getColorAt(coords.x, coords.y), colorNew: this.color}
       this.drawPixel(coords.x, coords.y, this.color)
@@ -129,6 +158,20 @@ name: "ImageEditor",
         this.drawPixel(entry.x, entry.y, entry.colorNew)
       }
     },
+    frameForward() {
+      if (this.frame < this.frames - 1) {
+        this.writePixels()
+        this.frame++
+        this.drawImage()
+      }
+    },
+    frameBack() {
+      if (this.frame > 0) {
+        this.writePixels()
+        this.frame--
+        this.drawImage()
+      }
+    },
     async reload() {
       await this.getImage(this.$route.params.name)
       this.pixels = this.$store.state.images[this.$route.params.name]
@@ -142,34 +185,62 @@ name: "ImageEditor",
       this.errorAlert = true
       this.errorAlertText = text
     },
-    saveAs(name) {
+    async saveAs(name) {
       if (name === '') {
         this.showError('Invalid image name')
         return
       }
-      this.save(name)
+      await this.save(name)
       this.saveAsName = ''
     },
-    saveClick() {
-      this.saveConfirm = true
+    async download() {
+      this.downloadDialog = false
+      switch(this.downloadType) {
+        case 0:
+          let name = this.$route.params.name
+            if (name.endsWith('_P'))
+              name = name.slice(0, name.length - 2)
+          let bufferFrame = new Uint16Array(this.width * this.height)
+          for (let i = 0; i < bufferFrame.length; i++)
+            bufferFrame[i] = this.pack565Color(this.hexToRgb(this.pixels[this.frame * this.width * this.height + i]))
+          this.$download(bufferFrame, `${name}-${this.width}-${this.height}-1.bin`)
+          break
+        case 1:
+          let buffer = new Uint16Array(this.width * this.height * this.frames)
+          for (let i = 0; i < buffer.length; i++)
+            buffer[i] = this.pack565Color(this.hexToRgb(this.pixels[i]))
+          this.$download(buffer, `${this.$route.params.name}-${this.width}-${this.height}-${this.frames}.bin`)
+          break
+        default:
+          let mimeType = [this.$jimp.MIME_PNG, this.$jimp.MIME_JPEG, this.$jimp.MIME_BMP][this.downloadType - 2]
+          let image = await this.$jimp.create(this.width, this.height)
+          for (let y = 0; y < this.height; y++)
+            for (let x = 0; x < this.width; x++)
+              image.setPixelColor(this.$jimp.cssColorToHex(this.getColorAt(x, y)), x, y)
+          try {
+            let result = await image.getBase64Async(mimeType)
+            this.$download(result, this.$route.params.name + '.' + mimeType.slice(6), mimeType)
+          } catch (error) {
+            console.error(error)
+          }
+          break
+      }
     },
-    save(name) {
-      let buffer = new Uint16Array(this.width * this.height * this.frames)
+    writePixels() {
       for (let y = 0; y < this.height; y++)
         for (let x = 0; x < this.width; x++)
-          buffer[y * this.width + x] = this.pack565Color(this.hexToRgb(this.getColorAt(x, y)))
-
-      let data = new FormData()
-      let blob = new Blob([buffer], {type: 'application/octet-stream'})
-      let file = new File([blob], 'image.bin')
-      data.append('image', file)
-      this.$axios.post('/uploadImage', data, {headers: {'Content-Type': `multipart/form-data`}, params: {name: name, width: this.width, height: this.height, length: this.frames, type: this.$store.state.imageData[this.$route.params.name].type}}).then(response => {
-
-      }).catch(error => {
-        console.error(error)
-      })
+          this.pixels[this.frame * this.width * this.height + y * this.width + x] = this.getColorAt(x, y)
+    },
+    async save(name) {
+      this.writePixels()
+      let buffer = new Uint16Array(this.width * this.height * this.frames)
+      for (let i = 0; i < buffer.length; i++)
+        buffer[i] = this.pack565Color(this.hexToRgb(this.pixels[i]))
+      await this.saveImageBuffer(name, this.$store.state.imageData[this.$route.params.name], buffer)
     },
     clear() {
+      this.history = []
+      this.historyIndex = -1
       for (let y = 0; y < this.height; y++)
         for (let x = 0; x < this.width; x++)
           this.drawPixel(x, y, this.color)
@@ -186,17 +257,17 @@ name: "ImageEditor",
       await this.sleep(1)
       this.canvas.fillStyle = '#000000'
       this.canvas.clearRect(0, 0, this.canvasWidth, this.canvasHeight)
+
       for (let i = 0; i < this.width; i++)
         this.canvas.fillRect(i * (this.pixelSize + 1), 0, 1, this.canvasHeight)
       this.canvas.fillRect(this.canvasWidth - 1, 0, 1, this.canvasHeight)
-
       for (let i = 0; i < this.height; i++)
         this.canvas.fillRect(0, i * (this.pixelSize + 1), this.canvasWidth, 1)
       this.canvas.fillRect(0, this.canvasHeight - 1, this.canvasWidth, 1)
 
       for (let y = 0; y < this.height; y++)
         for (let x = 0; x < this.width; x++)
-          this.drawPixel(x, y, this.pixels[x + y * this.width])
+          this.drawPixel(x, y, this.pixels[this.frame * this.width * this.height + x + y * this.width])
     },
     selectColor(id) {
       this.color = this.palette[id - 1]
@@ -233,8 +304,18 @@ name: "ImageEditor",
 </script>
 
 <style scoped>
+.md-radio {
+  display: flex;
+}
+
+.md-card {
+  min-width: 600px;
+}
+
 .canvas {
   //background-color: #4faf12;
+  width: 512px;
+  //height: ;
 }
 .color {
   width: 30px;

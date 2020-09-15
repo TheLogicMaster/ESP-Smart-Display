@@ -3,10 +3,49 @@
     <md-card>
       <h1>Dashboard</h1>
       <md-list>
-        <md-list-item class="md-layout md-gutter md-alignment-center-center"
-                      v-for="(stat, name) in this.$store.state.stats">
-          <b class="md-list-item stat-name"> {{ name }} </b>
-          <div class="md-list-item stat-value"> {{ stat }}</div>
+        <md-list-item class="md-layout md-gutter md-alignment-center-center">
+          <b class="md-list-item stat-name"> Uptime </b>
+          <div class="md-list-item stat-value"> {{ [this.$store.state.stats['uptime'], 'seconds'] | duration('humanize', false) }}</div>
+        </md-list-item>
+        <md-list-item class="md-layout md-gutter md-alignment-center-center">
+          <b class="md-list-item stat-name"> Reset Reason </b>
+          <div class="md-list-item stat-value"> {{ this.$store.state.stats['resetReason'] }}</div>
+        </md-list-item>
+        <md-list-item class="md-layout md-gutter md-alignment-center-center">
+          <b class="md-list-item stat-name"> Firmware Version </b>
+          <div class="md-list-item stat-value"> {{ this.$store.state.stats['version'] }}</div>
+        </md-list-item>
+        <md-list-item class="md-layout md-gutter md-alignment-center-center">
+          <b class="md-list-item stat-name"> Dashboard Version </b>
+          <div class="md-list-item stat-value"> {{ $dashboardVersion }}</div>
+        </md-list-item>
+        <md-list-item class="md-layout md-gutter md-alignment-center-center">
+          <b class="md-list-item stat-name"> Fragmentation </b>
+          <div class="md-list-item stat-value"> {{ this.$store.state.stats['fragmentation'] }}%</div>
+        </md-list-item>
+        <md-list-item class="md-layout md-gutter md-alignment-center-center">
+          <b class="md-list-item stat-name"> Free Memory </b>
+          <div class="md-list-item stat-value"> {{ this.$store.state.stats['memoryFree'] }} Bytes</div>
+        </md-list-item>
+        <md-list-item class="md-layout md-gutter md-alignment-center-center">
+          <b class="md-list-item stat-name"> Filesystem Usage </b>
+          <div class="md-list-item stat-value"> {{ (this.$store.state.stats['filesystemUsed'] / 1000).toFixed(1) }} KB ({{ (this.$store.state.stats['filesystemUsed'] / this.$store.state.stats['filesystemTotal'] * 100).toFixed(2) }}%) </div>
+        </md-list-item>
+        <md-list-item class="md-layout md-gutter md-alignment-center-center">
+          <b class="md-list-item stat-name"> Filesystem Size</b>
+          <div class="md-list-item stat-value"> {{ (this.$store.state.stats['filesystemTotal'] / 1000000).toFixed(2) }} MB</div>
+        </md-list-item>
+        <md-list-item class="md-layout md-gutter md-alignment-center-center">
+          <b class="md-list-item stat-name"> Width </b>
+          <div class="md-list-item stat-value"> {{ this.$store.state.stats['width'] }} Pixels</div>
+        </md-list-item>
+        <md-list-item class="md-layout md-gutter md-alignment-center-center">
+          <b class="md-list-item stat-name"> Height </b>
+          <div class="md-list-item stat-value"> {{ this.$store.state.stats['height'] }} Pixels</div>
+        </md-list-item>
+        <md-list-item class="md-layout md-gutter md-alignment-center-center">
+          <b class="md-list-item stat-name"> Power Supply Voltage </b>
+          <div class="md-list-item stat-value"> {{ this.$store.state.stats['vcc'] / 1000 }}V</div>
         </md-list-item>
       </md-list>
       <md-button class="md-raised md-accent" @click="getStats">Refresh</md-button>
@@ -29,9 +68,9 @@ export default {
   methods: {
     changeAutoRefresh() {
       if (this.autoRefresh)
-        this.timer = setInterval(this.update, 5000);
+        this.timer = setInterval(this.getStats, 5000)
       else
-        clearInterval(this.timer);
+        clearInterval(this.timer)
     }
   },
   beforeDestroy() {

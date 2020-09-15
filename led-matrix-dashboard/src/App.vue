@@ -70,7 +70,6 @@
 </template>
 
 <script>
-
 export default {
   name: 'App',
   mounted() {
@@ -117,7 +116,20 @@ export default {
   -moz-osx-font-smoothing: grayscale;
   text-align: center;
   color: #2c3e50;
-  //margin-top: 60px;
+//margin-top: 60px;
+}
+
+canvas {
+  image-rendering: -moz-crisp-edges;
+  image-rendering: -webkit-crisp-edges;
+  //image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+img {
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
 }
 
 .md-app {
