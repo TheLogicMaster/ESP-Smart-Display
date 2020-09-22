@@ -61,13 +61,13 @@ export default {
   name: "Images",
   components: {ImagePreview},
   async mounted() {
-    await this.waitForStats()
-    this.displayWidth = this.$store.state.stats.width
-    this.width = this.displayWidth
-    this.displayHeight = this.$store.state.stats.height
-    this.height = this.displayHeight
-    await this.waitForPromiseSuccess(this.getStats, 2000)
-    await this.refreshImages(Object.keys(this.$store.state.images).length === 0)
+    await this.waitForPromiseSuccess(this.getStats)
+    this.width = this.displayWidth = this.$store.state.stats.width
+    this.height = this.displayHeight = this.$store.state.stats.height
+    let full = Object.keys(this.$store.state.images).length === 0
+    if (!full)
+      await this.waitForPromiseSuccess(this.getImageData)
+    await this.refreshImages(full)
   },
   data: () => ({
     deleteConfirm: false,

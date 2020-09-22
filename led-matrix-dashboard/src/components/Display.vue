@@ -24,7 +24,8 @@
         <widget-editor :id="`widget${widget.id}`" @delete="config.widgets.splice(index, 1)"
                        @clone="config.widgets.push(cloneObject(widget))" class="widget-editor"
                        v-for="(widget, index) in config.widgets" v-bind:key="createUniqueKey(widget)"
-                       :widget="widget"></widget-editor>
+                       :widget="widget"
+                       @reorder="config.widgets.sort((a, b) => (a.id >= b.id) ? 1 : -1)"></widget-editor>
       </md-card>
     </md-content>
 
@@ -44,13 +45,17 @@
     <md-dialog :md-active.sync="presetDialog">
       <md-dialog-title>Load Preset</md-dialog-title>
       <md-field>
-        <md-select v-model="presetName">
-          <md-option v-for="(preset, name) in presets" :key="name" :value="name"> {{ name }}</md-option>
+        <md-select v-model="presetName" @input="parameters = []">
+          <md-option v-for="(args, name) in presets" :key="name" :value="name"> {{ name }}</md-option>
         </md-select>
+      </md-field>
+      <md-field v-for="(label, key) in presets[presetName]">
+        <label>{{ label }}</label>
+        <md-input v-model="parameters[key]"></md-input>
       </md-field>
       <md-dialog-actions>
         <md-button class="md-accent md-raised" @click="presetDialog = false">Cancel</md-button>
-        <md-button class="md-accent md-raised" @click="loadPreset">Create Widget</md-button>
+        <md-button class="md-accent md-raised" @click="loadPreset">Load Preset</md-button>
       </md-dialog-actions>
     </md-dialog>
   </div>
@@ -70,6 +75,7 @@ export default {
       widgets: [],
       backgroundColor: '#000000'
     },
+    parameters: [],
     grid: null,
     pixelSize: 10,
     addWidgetDialog: false,
@@ -77,29 +83,72 @@ export default {
     presetDialog: false,
     presetName: 'Black Lives Matter',
     presets: {
-      'Black Lives Matter': [
-        {
-          id: 0,
-          type: 0,
-          xOff: 0,
-          yOff: 0,
-          width: 64,
-          height: 32,
-          offset: 0,
-          content: 'blm',
-          disabled: false,
-          background: true,
-          frequency: 5000,
-          length: 2
-        }
-      ]
+      'Black Lives Matter': [],
+      'Mario Clock': [],
+      'Youtube Subscriber Count': ['Channel ID', 'Google API Key']
     }
   }),
   methods: {
     loadPreset() {
       this.config.widgets.length = 0
-      for (let i in this.presets[this.presetName])
-        this.config.widgets.push(this.bloatWidget(this.presets[this.presetName][i]))
+
+      let widgets = []
+      switch (this.presetName) {
+        case "Black Lives Matter":
+          widgets = [
+            {
+              width: 64,
+              height: 32,
+              content: 'blm',
+              background: true,
+              frequency: 5000,
+              length: 2
+            }
+          ]
+          break
+        case 'Mario Clock':
+          widgets = [
+            {
+              width: 64,
+              height: 32,
+              content: 'mario',
+              background: true,
+              length: 1
+            },
+            {
+              id: 1,
+              type: 2,
+              large: true,
+              xOff: 31,
+              yOff: 23,
+              width: 32,
+              height: 9,
+              colors: ['0x000000'],
+              transparent: true
+            }
+          ]
+          break
+        case 'Youtube Subscriber Count':
+          widgets = [
+            {
+              "id": 2, // UCFKDEp9si4RmHFWJW1vYsMA
+              "type": 5,
+              "source": `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${this.parameters[0]}&key=${this.parameters[1]}`,
+              "length": 15000,
+              "frequency": 60000,
+              "borderColor": '0xFF0000',
+              "backgroundColor": '0x00FFFF',
+              "args": ['items', '0', 'statistics', 'subscriberCount'],
+              "colors": ['0x00FF00'],
+              "width": 29,
+              "height": 5
+            }
+          ]
+          break
+      }
+
+      for (let i in widgets)
+        this.config.widgets.push(this.bloatWidget(widgets[i]))
       this.presetDialog = false
     },
     scrollToWidget(id) {

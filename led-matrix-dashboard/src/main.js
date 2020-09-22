@@ -69,13 +69,9 @@ Vue.prototype.$widgetNames = [
   'Digital Clock',
   'Analog Clock',
   'Text',
-  'JSON Get Text',
-  'Big Text',
-  'Weather Icon',
-  'Big Clock',
-  'JSON Get Big',
-  'Get Plain-text',
-  'Big Get Plain-text'
+  'JSON GET Text',
+  'GET Plain-text',
+  'Weather Icon'
 ]
 
 const UNIQUE_KEY_PROP = '__unique_key_prop__'
@@ -106,7 +102,7 @@ Vue.mixin({
     sleep(ms) {
       return new Promise(resolve => setTimeout(resolve, ms))
     },
-    async waitForPromiseSuccess(promiseProvider, interval, attempts = 0) {
+    async waitForPromiseSuccess(promiseProvider, interval = 500, attempts = 0) {
       let count = 0
       while (attempts === 0 || count < attempts) {
         if (await promiseProvider())
@@ -193,15 +189,20 @@ Vue.mixin({
       }
       return image
     },
-    encodeGimpImage(image) {
+    escapeString(string) {
+      return (string + '').replace(/[\\"']/g, '\\$&').replace(/\u0000/g, '\\0');
+    },
+  toBinary(num) {
+    return (num >>> 0).toString(2)
+  },
+    encodeGimpColor(color) {
       let data = ""
-      for (let i = 0; i < image.length; i++) {
-        let color = this.hexToRgb(image)
-        data.concat(String.fromCharCode((color.r >> 2) + 33))
-        data.concat(String.fromCharCode((((color.r & 3) << 4) | ((color.g & 0xF0) >> 4)) + 33))
-        data.concat(String.fromCharCode((((color.g & 0x0F) << 2) | ((color.b & 0x60) >> 6)) + 33))
-      }
-      return data
+      let rgb = this.hexToRgb(color)
+      data += String.fromCharCode((rgb.r >> 2) + 33)
+      data += String.fromCharCode((((rgb.r & 3) << 4) | ((rgb.g & 0xF0) >> 4)) + 33)
+      data += String.fromCharCode((((rgb.g & 0x0F) << 2) | ((rgb.b & 0xC0) >> 6)) + 33)
+      data += String.fromCharCode((rgb.b & 0x3F) + 33)
+      return this.escapeString(data)
     },
     async getImageData() {
       try {
@@ -221,7 +222,7 @@ Vue.mixin({
       try {
         await this.$axios.post('/uploadImage', formData, {
           headers: {'Content-Type': `multipart/form-data`},
-          params: {name: name, width: data.width, height: data.height, length: data.length, type: data.type}
+          params: {name: name, width: data.width, height: data.height, length: data.length, type: 1}
         })
         return true
       } catch (error) {
@@ -244,6 +245,8 @@ Vue.mixin({
       return pixels
     },
     async getImage(image) {
+      if (!store.state.imageData[image])
+        return
       store.commit('set', ['loadingImage', image])
       try {
         const response = await axios.get('/image', {
@@ -262,6 +265,8 @@ Vue.mixin({
     async deleteImage(image) {
       try {
         await axios.post('/deleteImage', '', {params: {name: image}})
+        delete store.state.images[image]
+        delete store.state.imageData[image]
         return true
       } catch (error) {
         console.log(error)
@@ -281,26 +286,38 @@ Vue.mixin({
       return success
     },
     getWidgetMinimumSize(widget) {
+      let size = {}
       switch (widget.type) {
         case 0:
         case 1: // Images
-          return {width: widget.width, height: widget.height}
+          size = {width: widget.width, height: widget.height}
+          break
         case 3: // Analog Clock
-          return {width: 10, height: 10}
+          size = {width: 10, height: 10}
+          break
         case 4: // Text
-          return {width: widget.content.length * 4, height: 5}
-        case 6: // Big Text
-          return {width: widget.content.length * 6, height: 7}
-        case 5:
-        case 10: // GET
-          return {width: 4, height: 5}
-        case 9:
-        case 11: // Big GET
-          return {width: 6, height: 7}
+          if (widget.contentType !== 0)
+            size = {width: widget.large ? 6 : 4, height: widget.large ? 7 : 5}
+          else
+            size = {width: widget.content.length * widget.large ? 6 : 4, height: widget.large ? 7 : 5}
+          break
+        case 2: // Digital Clock
+          size = {width: widget.contentType === 2 ? (widget.large ? 42 : 29) : (widget.large ? 30 : 21), height: widget.large ? 7 : 5}
+          break
+        case 5: // GET JSON
+        case 6: // GET Plaintext
+          size =  {width: widget.large ? 6: 4, height: widget.large ? 7: 5}
+          break
         default:
           let stock = this.createDefaultWidget(widget.type)
-          return {width: stock.width, height: stock.height}
+          size = {width: stock.width, height: stock.height}
+          break
       }
+      if (widget.bordered) {
+        size.width += 2
+        size.height += 2
+      }
+      return size
     },
     createDefaultWidget(type) {
       let realType = type || 0
@@ -313,6 +330,7 @@ Vue.mixin({
         source: '',
         length: 1,
         offset: 0,
+        large: false,
         frequency: 0,
         background: false,
         disabled: false,
@@ -338,10 +356,12 @@ Vue.mixin({
         case 2: // Digital Clock
           widget.width = 21
           widget.height = 5
+          widget.frequency = 100
           break
         case 3: // Analog Clock
           widget.width = 15
           widget.height = 15
+          widget.frequency = 100
           widget.colors = ['0xFF0000', '0x00FF00', '0x0000FF']
           break
         case 4: // Text
@@ -352,38 +372,22 @@ Vue.mixin({
         case 5: // GET JSON
           widget.width = 29
           widget.height = 5
-          widget.source = 'httpbin.org/get'
+          widget.frequency = 300000
+          widget.source = 'http://httpbin.org/get'
           widget.args = ['origin']
-          break
-        case 6: // Big Text
-          widget.width = 29
-          widget.height = 7
-          widget.content = 'Big Text'
+          widget.length = 3000
           break
         case 7: // Weather Icon
           widget.width = 10
           widget.height = 5
           widget.colors = []
           break
-        case 8: // Big Digital Clock
-          widget.width = 29
-          widget.height = 7
-          break
-        case 9: // Big GET JSON
-          widget.width = 29
-          widget.height = 7
-          widget.source = 'httpbin.org/get'
-          widget.args = ['origin']
-          break
-        case 10: // GET Plain-text
+        case 6: // GET Plain-text
           widget.width = 29
           widget.height = 5
+          widget.frequency = 300000
           widget.source = ''
-          break
-        case 11: // Big GET Plain-text
-          widget.width = 29
-          widget.height = 7
-          widget.source = ''
+          widget.length = 3000
           break
       }
       return widget
@@ -418,8 +422,21 @@ Vue.mixin({
       return {...this.createDefaultWidget(widget.type), ...widget}
     },
     bloatConfig(config) {
-      if (!config.backgroundColor)
-        config.backgroundColor = '0x000000'
+      config.backgroundColor = config.backgroundColor || '0x000000'
+      config.metric = config.metric || false
+      config.timezone = config.timezone || 'eastern'
+      config.weatherLocation = config.weatherLocation || ''
+      config.weatherKey = config.weatherKey || ''
+      config.brightnessMode = config.brightnessMode || 0
+      config.brightnessLower = config.brightnessLower || 15
+      config.brightnessUpper = config.brightnessUpper || 100
+      config.brightTime = config.brightTime || '09:00'
+      config.darkTime = config.darkTime || '20:30'
+      config.sensorBright = config.sensorBright || 1023
+      config.sensorDark = config.sensorDark || 750
+      config.fastUpdate = config.fastUpdate || false
+      config.latitude = config.latitude || 42.395060
+      config.longitude = config.longitude || -83.369500
       for (let i in config.widgets)
         config.widgets[i] = this.bloatWidget(config.widgets[i])
       return config
@@ -431,55 +448,7 @@ Vue.mixin({
           console.error('Config file was a string: ' + response.data)
           return false
         }
-        //console.log(response.data)
         store.commit('set', ['configuration', this.bloatConfig(this.cloneObject(response.data))])
-        /*store.commit('set', ['configuration', this.bloatConfig({
-          widgets: [{
-            id: 0,
-            type: 0,
-            xOff: 0,
-            yOff: 0,
-            width: 64,
-            height: 32,
-            offset: 0,
-            content: 'blm',
-            disabled: false,
-            background: true,
-            frequency: 5000,
-            length: 2
-          },
-            {
-              id: 1,
-              type: 3,
-              xOff: 10,
-              yOff: 10,
-              width: 15,
-              height: 15,
-              disabled: false,
-              background: false,
-              frequency: 0,
-              length: 1,
-              transparent: false
-            },
-            {
-              id: 2,
-              type: 4,
-              xOff: 0,
-              yOff: 0,
-              content: 'TEXT',
-              width: 15,
-              height: 15,
-              background: false,
-              backgroundColor: '0x00FFFF',
-              frequency: 0,
-              length: 1,
-              transparent: false
-            }
-          ],
-          timezone: 'eastern',
-          metric: false,
-          backgroundColor: "0x00F51E"
-        })])*/
         return true
       } catch (error) {
         console.error(error)

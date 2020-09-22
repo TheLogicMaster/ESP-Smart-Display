@@ -6,20 +6,20 @@
         <md-button class="md-layout-item md-accent md-raised" @click="reloadConfirm = true">Reload</md-button>
         <md-button class="md-layout-item md-accent md-raised" @click="saveConfirm = true">Save</md-button>
       </div>
-      <div class="fields">
-        <md-switch v-model="metric">Metric Units</md-switch>
-        <md-switch v-model="fastUpdate">Fast Update Display</md-switch>
+      <div class="fields" v-if="config">
+        <md-switch v-model="config.metric">Metric Units</md-switch>
+        <md-switch v-model="config.fastUpdate">Fast Update Display</md-switch>
         <md-field>
           <label>WeatherMap API Key</label>
-          <md-input v-model="weatherKey"></md-input>
+          <md-input v-model="config.weatherKey"></md-input>
         </md-field>
         <md-field>
           <label>WeatherMap Location</label>
-          <md-input v-model="weatherLocation"></md-input>
+          <md-input v-model="config.weatherLocation"></md-input>
         </md-field>
         <md-field>
           <label>Timezone</label>
-          <md-select v-model="timezone">
+          <md-select v-model="config.timezone">
             <md-option value="eastern">Eastern</md-option>
             <md-option value="central">Central</md-option>
             <md-option value="mountain">Mountain</md-option>
@@ -28,31 +28,51 @@
         </md-field>
         <md-field>
           <label>Brightness Mode</label>
-          <md-select v-model.number="brightnessMode">
-            <md-option :value="0">Fixed</md-option>
-            <md-option :value="1">Automatic</md-option>
+          <md-select v-model.number="config.brightnessMode">
+            <md-option :value="0">Static</md-option>
+            <md-option :value="1">Brightness Sensor</md-option>
             <md-option :value="2">Time of Day</md-option>
             <md-option :value="3">Sunrise</md-option>
           </md-select>
         </md-field>
-        <div v-if="brightnessMode !== 0" class="input">
+        <div v-if="config.brightnessMode !== 0" class="input">
           <label class="label">Lower Brightness</label>
-          <input min="1" type="range" class="slider" v-model.number="brightnessLower"> {{ brightnessLower }}%
+          <input min="1" type="range" class="slider" v-model.number="config.brightnessLower"> {{ config.brightnessLower }}%
         </div>
         <div class="input">
-          <label v-if="brightnessMode === 0" class="label">Brightness</label>
+          <label v-if="config.brightnessMode === 0" class="label">Brightness</label>
           <label v-else class="label">Upper Brightness</label>
-          <input min="1" type="range" class="slider" v-model.number="brightnessUpper"> {{ brightnessUpper }}%
+          <input min="1" type="range" class="slider" v-model.number="config.brightnessUpper"> {{ config.brightnessUpper }}%
         </div>
-        <div v-if="brightnessMode === 2">
+        <div v-if="config.brightnessMode === 1">
+          <md-field>
+            <label>Max Sensor Brightness</label>
+            <md-input :max="1023" v-model.number="config.sensorBright"></md-input>
+          </md-field>
+          <md-field>
+            <label>Min Sensor Brightness</label>
+            <md-input :min="0" v-model.number="config.sensorDark"></md-input>
+          </md-field>
+        </div>
+        <div v-if="config.brightnessMode === 2">
           <div class="input">
             <label class="label">Brightening Time</label>
-            <input class="time" v-model="brightTime" type="time">
+            <input class="time" v-model="config.brightTime" type="time">
           </div>
           <div class="input">
             <label class="label">Dimming Time</label>
-            <input class="time" v-model="darkTime" type="time">
+            <input class="time" v-model="config.darkTime" type="time">
           </div>
+        </div>
+        <div v-if="config.brightnessMode === 3">
+          <md-field>
+            <label>Longitude</label>
+            <md-input v-model.number="config.longitude"></md-input>
+          </md-field>
+          <md-field>
+            <label>Latitude</label>
+            <md-input v-model.number="config.latitude"></md-input>
+          </md-field>
         </div>
       </div>
     </md-card>
@@ -78,16 +98,7 @@
 export default {
   name: "Settings",
   data: () => ({
-    metric: false,
-    fastUpdate: false,
-    timezone: 'eastern',
-    weatherLocation: '',
-    weatherKey: '',
-    brightnessMode: 0,
-    brightnessUpper: 100,
-    brightnessLower: 1,
-    brightTime: '09:00',
-    darkTime: '20:30',
+    config: null,
     reloadConfirm: false,
     saveConfirm: false
   }),
@@ -96,33 +107,11 @@ export default {
   },
   methods: {
     async reload() {
-      // Todo: Switch to Display.vue method of configuration copy
       await this.waitForPromiseSuccess(this.getConfig, 500)
-      let config = this.$store.state.configuration
-      this.metric = config.metric || false
-      this.timezone = config.timezone || 'eastern'
-      this.weatherLocation = config.weatherLocation || ''
-      this.weatherKey = config.weatherKey || ''
-      this.brightnessMode = config.brightnessMode || 0
-      this.brightnessLower = config.brightnessLower || 1
-      this.brightnessUpper = config.brightnessUpper || 100
-      this.brightTime = config.brightTime || '09:00'
-      this.darkTime = config.darkTime || '20:30'
-      this.fastUpdate = config.fastUpdate || false
+      this.config = this.cloneObject(this.$store.state.configuration)
     },
     async save() {
-      let config = this.cloneObject(this.$store.state.configuration)
-      config.metric = this.metric
-      config.timezone = this.timezone
-      config.weatherLocation = this.weatherLocation
-      config.weatherKey = this.weatherKey
-      config.brightnessMode = this.brightnessMode
-      config.brightnessLower = this.brightnessLower
-      config.brightnessUpper = this.brightnessUpper
-      config.brightTime = this.brightTime
-      config.darkTime = this.darkTime
-      config.fastUpdate = this.fastUpdate
-      if (await this.saveConfig(config))
+      if (await this.saveConfig(this.config))
         ;
       else
         ;

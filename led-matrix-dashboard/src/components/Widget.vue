@@ -3,14 +3,13 @@
     <ImagePreview v-if="widget.type === 0 || widget.type === 1" :pixel-size="pixelSize" :interval="widget.frequency"
                   :image="widget.content" :frame="widget.offset || 0" :frames="widget.length"
                   :canvas-height="pixelSize * widget.height" :canvas-width="pixelSize * widget.width"></ImagePreview>
-    <div v-else-if="widget.type === 4 || widget.type === 6"
+    <div v-else-if="widget.type === 4"
          v-bind:style="{color: cppHexToJs(widget.colors[0]), fontSize: `${createDefaultWidget(widget.type).height * pixelSize}px`}"> {{ widget.content }}
     </div>
-    <div v-else-if="widget.type === 5 || widget.type === 9 || widget.type === 10 || widget.type === 11" v-bind:style="{fontSize: `${widget.width < 15 ? 20 : createDefaultWidget(widget.type).height * pixelSize}px`}">
+    <div v-else-if="widget.type === 5 || widget.type === 6" v-bind:style="{fontSize: `${widget.width < 15 ? 20 : createDefaultWidget(widget.type).height * pixelSize}px`}">
       API
     </div>
-    <img v-else class="image-pixelated" :src="widgetIcons[widget.type]" alt="Widget Icon"
-         :style="`width: 100%; height: 100%`">
+    <img v-else class="image-pixelated" :src="widgetIcon" alt="Widget Icon" :style="iconStyle">
   </div>
 </template>
 
@@ -26,7 +25,6 @@ export default {
     rawWidth: 1,
     rawHeight: 1,
     selected: 0,
-    widgetIcons: {3: 'analogClock.png', 7: 'weatherIcon.png', 2: 'clock.png', 8: 'bigClock.png'},
     nonResizeableTypes: [0, 1],
     currentWidget: {},
     interactable: null,
@@ -41,10 +39,29 @@ export default {
         height: `${this.widget.height * this.pixelSize}px`,
         'z-index': this.widget.id + 100,
         transform: `translate(${this.widget.xOff * this.pixelSize}px, ${this.widget.yOff * this.pixelSize}px)`,
-        backgroundColor: this.widget.transparent ? null : this.cppHexToJs(this.widget.backgroundColor),
-        outlineWidth: `${this.widget.bordered ? this.pixelSize : 1}px`,
+        backgroundColor: this.widget.transparent || this.widget.type === 3 ? null : this.cppHexToJs(this.widget.backgroundColor),
+        outlineWidth: `${this.widget.type === 3 ? 0 : (this.widget.bordered ? this.pixelSize : 1)}px`,
         outlineColor: this.widget.bordered ? this.cppHexToJs(this.widget.borderColor) : '#000000',
         outlineOffset: `${this.widget.bordered ? -this.pixelSize : -1}px`
+      }
+    },
+    iconStyle: function() {
+      if (this.widget.type === 3)
+        return {width: '100%', height: '100%'}
+      let widget = this.getWidgetMinimumSize(this.widget)
+      return {
+        width: `${widget.width * this.pixelSize}px`,
+        height: `${widget.height * this.pixelSize}px`
+      }
+    },
+    widgetIcon: function () {
+      switch (this.widget.type) {
+        case 3:
+          return 'analogClock.png'
+        case 7:
+          return 'weatherIcon.png'
+        case 2:
+          return `${this.widget.large ? 'bigClock' : 'clock'}${this.widget.contentType}.png`
       }
     }
   },
@@ -52,7 +69,8 @@ export default {
     widget: {
       deep: true,
       handler: function (widget) {
-        if (!this.resizing && (widget.width !== this.currentWidget.width || widget.height !== this.currentWidget.height || widget.content !== this.currentWidget.content)) {
+        // Todo: simplify check?
+        if (!this.resizing && (widget.width !== this.currentWidget.width || widget.height !== this.currentWidget.height || widget.content !== this.currentWidget.content || widget.contentType !== this.currentWidget.contentType || widget.bordered !== this.currentWidget.bordered || widget.large !== this.currentWidget.large)) {
           this.interactable.unset()
           this.setup(widget)
         }
@@ -136,7 +154,6 @@ export default {
           }
         })
       this.interactable.on('doubletap', event => {
-        console.log(event)
         this.$emit('doubletap')
       })
     }
