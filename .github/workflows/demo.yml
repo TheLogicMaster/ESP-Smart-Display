@@ -15,7 +15,7 @@ jobs:
           npm install
           npm run build
         env: 
-          APP_VUE_DEMO_MODE: true
+          VUE_APP_DEMO_MODE: true
 
       - name: Deploy 🚀
         uses: JamesIves/github-pages-deploy-action@3.6.1
