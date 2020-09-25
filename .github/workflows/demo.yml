@@ -11,6 +11,7 @@ jobs:
 
       - name: Install and Build 🔧
         run: |
+          cd ./led-matrix-dashboard
           npm install
           npm run build
         env: 
