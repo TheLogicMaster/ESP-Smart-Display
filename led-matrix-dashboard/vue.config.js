@@ -1,5 +1,3 @@
-const CompressionPlugin = require('compression-webpack-plugin');
-
 let assetsDir = "assets";
 module.exports = {
   configureWebpack: {
@@ -19,11 +17,5 @@ module.exports = {
         }
       ]);
     }
-
-    config.plugins
-      //.delete("html")
-      .delete("prefetch")
-      .delete("preload");
-    config.plugin('CompressionPlugin').use(CompressionPlugin);
   }
 };

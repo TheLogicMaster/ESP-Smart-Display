@@ -14,9 +14,6 @@ jobs:
           cd ./led-matrix-dashboard
           npm install
           npm run build
-          ls
-          cd ..
-          ls
         env: 
           APP_VUE_DEMO_MODE: true
 
