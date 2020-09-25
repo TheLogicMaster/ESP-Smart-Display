@@ -14,6 +14,7 @@ jobs:
           cd ./led-matrix-dashboard
           npm install
           npm run build
+          cd ..
         env: 
           APP_VUE_DEMO_MODE: true
 
@@ -22,5 +23,5 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: gh-pages # The branch the action should deploy to.
-          FOLDER: build # The folder the action should deploy.
+          FOLDER: led-matrix-dashboard/build # The folder the action should deploy.
           CLEAN: true # Automatically remove deleted files from the deploy branch 
