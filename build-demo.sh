@@ -9,5 +9,6 @@ echo Building demo dashboard...
 npm run build
 rm -r ./demo
 mv ./dist ./demo
+cp -r ./demo-assets/* ./demo
 
 echo Done

@@ -9,7 +9,7 @@
         </md-list-item>
         <md-list-item class="md-layout md-gutter md-alignment-center-center">
           <b class="md-list-item stat-name"> Reset Reason </b>
-          <div class="md-list-item stat-value"> {{ this.$store.state.stats['resetReason'] }}</div>
+          <div class="md-list-item stat-value"> {{ prettyPrintResetReason }}</div>
         </md-list-item>
         <md-list-item class="md-layout md-gutter md-alignment-center-center">
           <b class="md-list-item stat-name"> Firmware Version </b>
@@ -82,6 +82,20 @@ export default {
     autoRefresh: false,
     timer: null
   }),
+  computed: {
+    prettyPrintResetReason: function () {
+      let reason = this.$store.state.stats['resetReason']
+      switch (reason) {
+        case 'Hardware Watchdog':
+        case 'Exception':
+        case 'Software Watchdog':
+        case 'Unknown':
+          return reason
+        default:
+          return 'Normal'
+      }
+    }
+  },
   mounted() {
     this.getStats()
   },

@@ -278,10 +278,6 @@ Vue.mixin({
       return this.escapeString(data)
     },
     async getImageData() {
-      if (Vue.prototype.$demoMode) {
-        store.commit('set', ['imageData', {}])
-        return true
-      }
       try {
         const response = await axios.get('/images')
         store.commit('set', ['imageData', response.data])
@@ -327,12 +323,9 @@ Vue.mixin({
       if (!store.state.imageData[image])
         return false
 
-      if (Vue.prototype.$demoMode)
-        return false
-
       store.commit('set', ['loadingImage', image])
       try {
-        const response = await axios.get('/image', {
+        const response = await axios.get(`/image${Vue.prototype.$demoMode ? '/' + image : ''}`, {
           responseType: store.state.imageData[image].type === 2 ? 'text' : 'arraybuffer',
           params: {image: image + (store.state.imageData[image].progmem ? '_P' : '')}
         })
@@ -563,11 +556,29 @@ Vue.mixin({
     async getConfig() {
       if (Vue.prototype.$demoMode) {
         store.commit('set', ['configuration', this.bloatConfig({
-          widgets: [{xOff: 17, yOff: 11, type: 4, transparent: true, large: true, content: 'Hello', colors: ['0x000000'], width: 30, height: 8}],
+          widgets: [{
+            width: 64,
+            height: 32,
+            content: 'mario',
+            background: true,
+            length: 1
+          },
+            {
+              id: 1,
+              type: 2,
+              large: true,
+              xOff: 31,
+              yOff: 23,
+              width: 32,
+              height: 9,
+              colors: ['0x000000'],
+              transparent: true
+            }],
           backgroundColor: '0x00FFFF'
         })])
         return true
       }
+
       try {
         const response = await axios.get('/config')
         if ((typeof response.data) === 'string') {
@@ -598,33 +609,15 @@ Vue.mixin({
 
 Vue.prototype.$axios = axios
 
-let address = window.location.protocol + '//' + window.location.hostname + (window.location.port === '' ? '' : ':' + window.location.port)
+let address = window.location.protocol + '//' + window.location.hostname + window.location.pathname + (window.location.port === '' ? '' : ':' + window.location.port)
 if (address.includes(':8080'))
   address = 'http://10.0.0.62:80'
 axios.defaults.baseURL = address
-
-function prettyResetReason(reason) {
-  switch (reason) {
-    case 'Hardware Watchdog':
-    case 'Exception':
-    case 'Software Watchdog':
-    case 'Unknown':
-      return reason
-    default:
-      return 'Normal'
-  }
-}
 
 Vue.filter('capitalize', function (value) {
   if (!value) return ''
   value = value.toString()
   return value.charAt(0).toUpperCase() + value.slice(1)
-})
-
-Vue.filter('remove_P', function (value) {
-  if (!value) return ''
-  value = value.toString()
-  return value.endsWith('_P') ? value.slice(0, value.length - 2) : value
 })
 
 export const store = new Vuex.Store({
