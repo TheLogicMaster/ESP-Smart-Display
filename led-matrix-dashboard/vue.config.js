@@ -1,5 +1,6 @@
 let assetsDir = "assets";
 module.exports = {
+  publicPath: './',
   configureWebpack: {
     output: {
       filename: 'js/[id].js',

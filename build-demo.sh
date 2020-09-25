@@ -7,6 +7,7 @@ cd ./led-matrix-dashboard
 
 echo Building demo dashboard...
 npm run build
+rm -r ./demo
 mv ./dist ./demo
 
 echo Done
