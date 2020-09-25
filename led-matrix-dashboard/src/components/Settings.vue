@@ -3,8 +3,8 @@
     <md-card>
       <h1>Settings</h1>
       <div>
-        <md-button class="md-layout-item md-accent md-raised" @click="reloadConfirm = true">Reload</md-button>
-        <md-button class="md-layout-item md-accent md-raised" @click="saveConfirm = true">Save</md-button>
+        <md-button class="md-layout-item md-accent md-raised" @click="confirmReload">Reload</md-button>
+        <md-button class="md-layout-item md-accent md-raised" @click="confirmSave">Save</md-button>
       </div>
       <div class="fields" v-if="config">
         <md-switch v-model="config.metric">Metric Units</md-switch>
@@ -76,21 +76,6 @@
         </div>
       </div>
     </md-card>
-
-    <md-dialog-confirm
-        :md-active.sync="reloadConfirm"
-        md-title="Reload Settings"
-        md-content="Are you sure you want to reload the settings? This will erase unsaved changes."
-        md-confirm-text="Reload"
-        md-cancel-text="Cancel"
-        @md-confirm="reload" />
-    <md-dialog-confirm
-        :md-active.sync="saveConfirm"
-        md-title="Save Settings"
-        md-content="Are you sure you want to save the settings?"
-        md-confirm-text="Save"
-        md-cancel-text="Cancel"
-        @md-confirm="save" />
   </div>
 </template>
 
@@ -98,23 +83,32 @@
 export default {
   name: "Settings",
   data: () => ({
-    config: null,
-    reloadConfirm: false,
-    saveConfirm: false
+    config: {}
   }),
   async mounted() {
     await this.reload()
   },
   methods: {
+    confirmReload() {
+      if (this.areObjectsEqual(this.$store.state.configuration, this.config))
+        this.reload().then()
+      else
+        this.confirm(() => this.reload().then(), () => {},
+            'Reload Settings', 'Are you sure you want to reload the settings? This will erase unsaved changes.')
+    },
     async reload() {
       await this.waitForPromiseSuccess(this.getConfig, 500)
       this.config = this.cloneObject(this.$store.state.configuration)
     },
+    confirmSave() {
+      this.confirm(() => this.save().then(), () => {}, 'Save Settings',
+          'Are you sure you want to update the display settings? This will overwrite the current settings.')
+    },
     async save() {
       if (await this.saveConfig(this.config))
-        ;
+        this.info('Saved Settings', 'Successfully updated display settings.')
       else
-        ;
+        this.error('Error', 'Failed to update display settings.')
     }
   }
 }

@@ -150,7 +150,7 @@
     </template>
     <div>
       <md-checkbox v-model="widget.disabled">Disabled</md-checkbox>
-      <md-button @click="$emit('delete')" class="md-accent md-raised">Delete</md-button>
+      <md-button @click="tryDelete" class="md-raised" :class="deleting ? 'md-primary' : 'md-accent'">Delete</md-button>
       <md-button @click="$emit('clone')" class="md-accent md-raised">Clone</md-button>
     </div>
   </md-card>
@@ -173,6 +173,15 @@ export default {
     }
   },
   methods: {
+    async tryDelete() {
+      if (this.deleting)
+        this.$emit('delete')
+      else {
+        this.deleting = true
+        await this.sleep(3000)
+        this.deleting = false
+      }
+    },
     getAuthType(auth) {
       if (auth.startsWith('Basic '))
         return 1
@@ -252,7 +261,8 @@ export default {
     dynamic: false,
     auth: '',
     args: 0,
-    collapsed: false
+    collapsed: false,
+    deleting: false
   }),
   props: ['widget']
 }

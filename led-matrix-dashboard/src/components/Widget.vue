@@ -4,7 +4,7 @@
                   :image="widget.content" :frame="widget.offset || 0" :frames="widget.length"
                   :canvas-height="pixelSize * widget.height" :canvas-width="pixelSize * widget.width"></ImagePreview>
     <div v-else-if="widget.type === 4"
-         v-bind:style="{color: cppHexToJs(widget.colors[0]), fontSize: `${createDefaultWidget(widget.type).height * pixelSize}px`}"> {{ widget.content }}
+         v-bind:style="{color: cppHexToJs(widget.colors[0]), fontSize: `${getWidgetMinimumSize(widget).height * pixelSize}px`}"> {{ widget.content }}
     </div>
     <div v-else-if="widget.type === 5 || widget.type === 6" v-bind:style="{fontSize: `${widget.width < 15 ? 20 : createDefaultWidget(widget.type).height * pixelSize}px`}">
       API

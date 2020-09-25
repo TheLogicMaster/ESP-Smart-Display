@@ -3,8 +3,8 @@
     <md-card class="json-editor md-layout-item">
       <h1>Configuration Editor</h1>
       <div class="md-layout">
-        <md-button class="md-layout-item md-accent md-raised" @click="buttonReload">Reload</md-button>
-        <md-button class="md-layout-item md-accent md-raised" @click="buttonSave">Save</md-button>
+        <md-button class="md-layout-item md-accent md-raised" @click="confirmReload">Reload</md-button>
+        <md-button class="md-layout-item md-accent md-raised" @click="confirmSave">Save</md-button>
         <md-checkbox class="md-layout-item md-accent" v-model="autoSave" @change="changeAutoSave">Auto-Save</md-checkbox>
       </div>
       <JsonEditor
@@ -34,20 +34,20 @@ export default {
   },
   methods: {
     changeAutoSave() {
-      if (this.autoSave) {
-        if (window.confirm("Are you sure you want to enable autosaving? This will instantly overwrite the display configuration upon config changes."))
-          this.save(this.jsonData)
-        else
-          this.autoSave = false
-      }
+      if (this.autoSave)
+        this.confirm(() => this.save(this.jsonData).then(), () => {this.autoSave = false},
+            'Auto-Save', 'Are you sure you want to enable autosaving? This will instantly overwrite the display configuration upon config changes.')
     },
-    buttonReload() {
-      if (window.confirm('Are you sure you want to reload the configuration file? Unsaved changes will be lost.'))
-        this.reload()
+    confirmReload() {
+      if (this.areObjectsEqual(this.$store.state.configuration, this.jsonData))
+        this.reload().then()
+      else
+        this.confirm(() => this.reload().then(), () => {},
+            'Reload Config', 'Are you sure you want to reload the configuration file? Unsaved changes will be lost.')
     },
-    buttonSave() {
-      if (window.confirm('Are you sure you want to overwrite the current configuration?'))
-        this.save(this.jsonData)
+    confirmSave() {
+      this.confirm(() => this.save(this.jsonData).then(), () => {},
+          'Save Config', 'Are you sure you want to overwrite the current configuration?')
     },
     async save(jsonData) {
       await this.saveConfig(jsonData)

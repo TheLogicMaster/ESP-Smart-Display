@@ -52,6 +52,22 @@ import Settings from "@/components/Settings";
 import Jimp from 'jimp'
 import download from 'downloadjs'
 import interact from 'interactjs'
+import Snotify, {SnotifyPosition} from 'vue-snotify'
+
+Vue.use(Snotify, {
+  toast: {
+    position: SnotifyPosition.rightTop,
+    animation: {
+      enter: 'bounceInDown',
+      exit: 'bounceInDown',
+      time: 800
+    },
+    timeout: 3000
+  },
+  global: {
+    //preventDuplicates: true
+  }
+})
 
 // Todo: Import only needed VueMaterial components
 Vue.use(VueMaterial)
@@ -62,7 +78,8 @@ Vue.use(Router)
 Vue.prototype.$download = download
 Vue.prototype.$jimp = Jimp
 Vue.prototype.$interact = interact
-Vue.prototype.$dashboardVersion = 0
+Vue.prototype.$dashboardVersion = Number(process.env.VUE_APP_DASHBOARD_VERSION)
+Vue.prototype.$demoMode = Boolean(process.env.VUE_APP_DEMO_MODE)
 Vue.prototype.$widgetNames = [
   'Built-in Image',
   'Custom Image',
@@ -99,8 +116,62 @@ Vue.mixin({
     isObjectEmpty(o) {
       return Object.keys(o).length === 0
     },
+    areObjectsEqual(object1, object2) {
+      const keys1 = Object.keys(object1);
+      const keys2 = Object.keys(object2);
+      if (keys1.length !== keys2.length)
+        return false;
+
+      for (let key of keys1) {
+        const val1 = object1[key];
+        const val2 = object2[key];
+        const areObjects = isObject(val1) && isObject(val2);
+        if (areObjects && !this.areObjectsEqual(val1, val2) || !areObjects && val1 !== val2)
+          return false;
+      }
+      return true;
+    },
     sleep(ms) {
       return new Promise(resolve => setTimeout(resolve, ms))
+    },
+    info(title, content) {
+      this.$snotify.info(content, title, {
+        closeOnClick: true
+      })
+    },
+    error(title, content) {
+      this.$snotify.error(content, title, {
+        closeOnClick: true,
+        timeout: 0
+      })
+    },
+    confirm(confirm, cancel, title, content) {
+      this.$snotify.confirm(content, title, {
+        closeOnClick: false,
+        position: SnotifyPosition.centerCenter,
+        buttons: [
+          {
+            text: 'Cancel', action: (toast) => {
+              this.$snotify.remove(toast.id);
+              cancel()
+            }, bold: true
+          },
+          {
+            text: 'Yes', action: (toast) => {
+              this.$snotify.remove(toast.id);
+              confirm()
+            }, bold: true
+          }
+        ]
+      }).on("mounted", () => store.commit('set', ['backdrop', true]))
+        .on("destroyed", () => store.commit('set', ['backdrop', false]))
+        .on("hidden", () => store.commit('set', ['backdrop', false]))
+    },
+    confirmNavigation(next, title, content) {
+      this.confirm(() => next(), () => next(false), title, content)
+    },
+    confirmUnsavedNavigation(next) {
+      this.confirmNavigation(next, 'Unsaved Changes', 'Are you sure you want to leave without saving?')
     },
     async waitForPromiseSuccess(promiseProvider, interval = 500, attempts = 0) {
       let count = 0
@@ -151,6 +222,8 @@ Vue.mixin({
       return "0x" + hex.slice(1, hex.length).toUpperCase()
     },
     cppHexToJs(hex) {
+      if (hex === null || hex === '')
+        return '#000000'
       return "#" + hex.slice(2, hex.length).toLowerCase()
     },
     rgbToHex(r, g, b) {
@@ -192,9 +265,9 @@ Vue.mixin({
     escapeString(string) {
       return (string + '').replace(/[\\"']/g, '\\$&').replace(/\u0000/g, '\\0');
     },
-  toBinary(num) {
-    return (num >>> 0).toString(2)
-  },
+    toBinary(num) {
+      return (num >>> 0).toString(2)
+    },
     encodeGimpColor(color) {
       let data = ""
       let rgb = this.hexToRgb(color)
@@ -205,6 +278,10 @@ Vue.mixin({
       return this.escapeString(data)
     },
     async getImageData() {
+      if (Vue.prototype.$demoMode) {
+        store.commit('set', ['imageData', {}])
+        return true
+      }
       try {
         const response = await axios.get('/images')
         store.commit('set', ['imageData', response.data])
@@ -215,12 +292,14 @@ Vue.mixin({
       }
     },
     async saveImageBuffer(name, data, buffer) {
+      if (Vue.prototype.$demoMode)
+        return true
       let formData = new FormData()
       let blob = new Blob([buffer], {type: 'application/octet-stream'})
       let file = new File([blob], 'image.bin')
       formData.append('image', file)
       try {
-        await this.$axios.post('/uploadImage', formData, {
+        await axios.post('/uploadImage', formData, {
           headers: {'Content-Type': `multipart/form-data`},
           params: {name: name, width: data.width, height: data.height, length: data.length, type: 1}
         })
@@ -246,7 +325,11 @@ Vue.mixin({
     },
     async getImage(image) {
       if (!store.state.imageData[image])
-        return
+        return false
+
+      if (Vue.prototype.$demoMode)
+        return false
+
       store.commit('set', ['loadingImage', image])
       try {
         const response = await axios.get('/image', {
@@ -263,6 +346,8 @@ Vue.mixin({
       }
     },
     async deleteImage(image) {
+      if (Vue.prototype.$demoMode)
+        return true
       try {
         await axios.post('/deleteImage', '', {params: {name: image}})
         delete store.state.images[image]
@@ -299,14 +384,17 @@ Vue.mixin({
           if (widget.contentType !== 0)
             size = {width: widget.large ? 6 : 4, height: widget.large ? 7 : 5}
           else
-            size = {width: widget.content.length * widget.large ? 6 : 4, height: widget.large ? 7 : 5}
+            size = {width: widget.content.length * (widget.large ? 6 : 4), height: widget.large ? 7 : 5}
           break
         case 2: // Digital Clock
-          size = {width: widget.contentType === 2 ? (widget.large ? 42 : 29) : (widget.large ? 30 : 21), height: widget.large ? 7 : 5}
+          size = {
+            width: widget.contentType === 2 ? (widget.large ? 42 : 29) : (widget.large ? 30 : 21),
+            height: widget.large ? 7 : 5
+          }
           break
         case 5: // GET JSON
         case 6: // GET Plaintext
-          size =  {width: widget.large ? 6: 4, height: widget.large ? 7: 5}
+          size = {width: widget.large ? 6 : 4, height: widget.large ? 7 : 5}
           break
         default:
           let stock = this.createDefaultWidget(widget.type)
@@ -319,30 +407,33 @@ Vue.mixin({
       }
       return size
     },
-    createDefaultWidget(type) {
-      let realType = type || 0
-      let widget = {
+    getWidgetDefaults() {
+      return {
         id: 0,
         xOff: 0,
         yOff: 0,
-        type: realType,
+        type: 0,
         content: '',
         source: '',
-        length: 1,
+        length: 0,
         offset: 0,
         large: false,
         frequency: 0,
         background: false,
         disabled: false,
         bordered: false,
-        borderColor: '0xFF0000',
-        backgroundColor: '0x00FFFF',
+        borderColor: '0x000000',
+        backgroundColor: '0x000000',
         contentType: 0,
         auth: '',
         args: [],
-        colors: ['0x00FF00']
+        colors: []
       }
-      switch (realType) {
+    },
+    createDefaultWidget(type) {
+      let widget = this.getWidgetDefaults()
+      widget.type = type || 0
+      switch (widget.type) {
         case 1: // FS Image
           widget.content = 'blm'
         case 0: // Progmem Image
@@ -351,12 +442,12 @@ Vue.mixin({
           widget.length = 1
           widget.offset = 0
           widget.background = true
-          widget.colors = []
           break
         case 2: // Digital Clock
           widget.width = 21
           widget.height = 5
           widget.frequency = 100
+          widget.colors = ['0x00FF00']
           break
         case 3: // Analog Clock
           widget.width = 15
@@ -368,6 +459,7 @@ Vue.mixin({
           widget.width = 10
           widget.height = 5
           widget.content = 'TEXT'
+          widget.colors = ['0x00FF00']
           break
         case 5: // GET JSON
           widget.width = 29
@@ -376,11 +468,12 @@ Vue.mixin({
           widget.source = 'http://httpbin.org/get'
           widget.args = ['origin']
           widget.length = 3000
+          widget.colors = ['0x00FF00']
           break
         case 7: // Weather Icon
           widget.width = 10
           widget.height = 5
-          widget.colors = []
+          widget.frequency = 1000
           break
         case 6: // GET Plain-text
           widget.width = 29
@@ -388,11 +481,32 @@ Vue.mixin({
           widget.frequency = 300000
           widget.source = ''
           widget.length = 3000
+          widget.colors = ['0x00FF00']
           break
       }
       return widget
     },
     async getStats() {
+      if (Vue.prototype.$demoMode) {
+        store.commit('set', ['stats', {
+          uptime: 30000,
+          resetReason: 'Software/System restart',
+          version: 0,
+          fragmentation: 15,
+          memoryFree: 17920,
+          transparencyBuffer: true,
+          filesystemUsed: 614400,
+          filesystemTotal: 2070000,
+          maxOpenFiles: 5,
+          maxPathLength: 31,
+          width: 64,
+          height: 32,
+          vcc: 65535,
+          brightness: 100,
+          brightnessSensor: 800
+        }])
+        return true
+      }
       try {
         const response = await axios.get('/stats')
         if ((typeof response.data) === 'string') {
@@ -419,7 +533,11 @@ Vue.mixin({
       return config
     },
     bloatWidget(widget) {
-      return {...this.createDefaultWidget(widget.type), ...widget}
+      let defaults = this.getWidgetDefaults()
+      for (let key of Object.keys(defaults))
+        widget[key] = widget[key] || defaults[key]
+      return widget
+      //return {...this.createDefaultWidget(widget.type), ...widget}
     },
     bloatConfig(config) {
       config.backgroundColor = config.backgroundColor || '0x000000'
@@ -437,11 +555,19 @@ Vue.mixin({
       config.fastUpdate = config.fastUpdate || false
       config.latitude = config.latitude || 42.395060
       config.longitude = config.longitude || -83.369500
+      config.widgets = config.widgets || []
       for (let i in config.widgets)
         config.widgets[i] = this.bloatWidget(config.widgets[i])
       return config
     },
     async getConfig() {
+      if (Vue.prototype.$demoMode) {
+        store.commit('set', ['configuration', this.bloatConfig({
+          widgets: [{xOff: 17, yOff: 11, type: 4, transparent: true, large: true, content: 'Hello', colors: ['0x000000'], width: 30, height: 8}],
+          backgroundColor: '0x00FFFF'
+        })])
+        return true
+      }
       try {
         const response = await axios.get('/config')
         if ((typeof response.data) === 'string') {
@@ -456,9 +582,11 @@ Vue.mixin({
       }
     },
     async saveConfig(config) {
+      if (Vue.prototype.$demoMode)
+        return true
       try {
         store.commit('set', ['configuration', this.cloneObject(config)])
-        await axios.post('/config', this.cleanConfig(this.cloneObject(config)))
+        await axios.post('/config', this.cleanConfig(this.cloneObject(config)), {timeout: 10000})
         return true
       } catch (error) {
         console.log(error)
@@ -505,7 +633,8 @@ export const store = new Vuex.Store({
     imageData: {},
     images: {},
     loadingImage: '',
-    stats: {}
+    stats: {},
+    backdrop: false
   },
   mutations: {
     set(state, [variable, value]) {

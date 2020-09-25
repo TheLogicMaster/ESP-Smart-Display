@@ -31,12 +31,8 @@
 #define WIDGET_ANALOG_CLOCK 3
 #define WIDGET_TEXT 4
 #define WIDGET_TEXT_GET_JSON 5
-#define WIDGET_TEXT_GET 6 //10
+#define WIDGET_TEXT_GET 6
 #define WIDGET_WEATHER_ICON 7
-//#define WIDGET_TEXT_BIG 6
-//#define WIDGET_CLOCK_BIG 8
-//#define WIDGET_TEXT_GET_JSON_BIG 9
-//#define WIDGET_TEXT_GET_BIG 11
 #define IMAGE_UINT8 0
 #define IMAGE_UINT16 1
 #define IMAGE_GIMP 2
@@ -54,26 +50,27 @@
 #define STATE_UPDATING 1
 
 // Configuration
-#define MAX_CONFIG_FILE_SIZE 3000
-#define CONFIG_JSON_BUFFER_SIZE 5000
-#define JSON_REQUEST_BUFFER_SIZE 2000
-#define MAX_IMAGE_DATA_FILE_SIZE 2000
-#define IMAGE_JSON_BUFFER_SIZE 2500
-#define WEATHER_UPDATE_INTERVAL 3600000 // Every Hour
+#define MAX_CONFIG_FILE_SIZE 3000 // Max config file size in flash
+#define CONFIG_JSON_BUFFER_SIZE 5000 // The buffer for configuration file parsing
+#define JSON_REQUEST_BUFFER_SIZE 2000 // The JSON buffer for parsing JSON GET requests
+#define MAX_IMAGE_DATA_FILE_SIZE 2000 // The maximum size for the image data file
+#define IMAGE_JSON_BUFFER_SIZE 2500 // The buffer size for image data, increase if not seeing all uploaded images
+#define WEATHER_UPDATE_INTERVAL 3600000 // Every Hour update the weather if using any weather widgets
 #define NTP_UPDATE_INTERVAL 3700000 // Just over every hour to avoid large update delays
-#define PIXEL_YIELD_THRESHOLD 100
-#define SERVE_PROGMEM_IMAGES true
-#define PROFILE_RENDERING false
-#define BRIGHTNESS_UPDATE_INTERVAL 10
+#define PIXEL_YIELD_THRESHOLD 100 // Might not be necisary, yields while drawign images larger than 10 by 10
+#define PROFILE_RENDERING false // Enable to log rendering times
+#define BRIGHTNESS_UPDATE_INTERVAL 10 // Millis between brightness increments
 #define SUN_UPDATE_INTERVAL 7200000 // Every 2 hours, since sun won't rise within 2 hours of date change
 #define BRIGHTNESS_SENSOR_PIN A0 // The pin to get photoresistor value from, if using
-#define USE_BRIGHTNESS_SENSOR // Disables Vcc reading functionality to use brightness sensor
+#define USE_BRIGHTNESS_SENSOR true // Disables Vcc reading functionality to use brightness sensor
 #define BRIGHTNESS_ROLLING_AVG_SIZE 10 // Higher value makes transition smoother, 4 bytes per buffer value, zero for no buffer
-#define HTTPS_TRANSMIT_BUFFER 512
+#define HTTPS_TRANSMIT_BUFFER 512 // Limit HTTPS buffers to prevent HTTPS GET requests all failing
 #define HTTPS_RECEIVE_BUFFER 1024
-//#define ENABLE_ARDUINO_OTA
-#define DEBUGGING
+#define ENABLE_ARDUINO_OTA false // LAN based OTA, but doesn't work for FS updates
+#define USE_DOUBLE_BUFFERING true // Only disable if pressed for memory, will cause visual glitches/partial rendering
+#define CACHE_DASHBOARD true // Shouldn't cause issues, with dashboard version checking
 
+// Configuration Flags
 #ifndef VERSION_CODE
 #define VERSION_CODE 0
 #endif
@@ -83,16 +80,13 @@
 #ifndef DISPLAY_HEIGHT
 #define DISPLAY_HEIGHT 32
 #endif
-#ifdef ENABLE_ARDUINO_OTA
+#if ENABLE_ARDUINO_OTA
 #include <ArduinoOTA.h>
 #endif
-
 #ifdef DEBUGGING
 #define DEBUG(fmt, ...)  Serial.printf_P((PGM_P)PSTR( "DEBUG: " fmt), ## __VA_ARGS__)
-//#define DEBUG(fmt, ...) Serial.printf("DEBUG: " fmt, ## __VA_ARGS__)
 #else
 #define DEBUG(...)
-//#define DEBUG(...)
 #endif
 
 #pragma endregion
@@ -117,7 +111,9 @@ std::map<std::string, Timezone *> timezones = {{"eastern",  &Eastern},
 
 #pragma region PxMatrix
 //#define PxMATRIX_COLOR_DEPTH 4
+#if USE_DOUBLE_BUFFERING
 #define double_buffer
+#endif
 #define PxMATRIX_MAX_HEIGHT DISPLAY_HEIGHT
 #define PxMATRIX_MAX_WIDTH DISPLAY_WIDTH
 
@@ -348,6 +344,7 @@ double longitude;
 double lattitude;
 
 // State values
+uint8_t dashboardVersion;
 uint8_t state;
 time_t weatherUpdateTime;
 uint16_t weatherID = 200;
@@ -377,7 +374,7 @@ NTPClient *ntpClient;
 OpenWeatherMapForecast weatherClient;
 DisplayBuffer displayBuffer(DISPLAY_WIDTH, DISPLAY_HEIGHT);
 
-#ifndef USE_BRIGHTNESS_SENSOR
+#if !USE_BRIGHTNESS_SENSOR
 ADC_MODE(ADC_VCC);
 #endif
 
@@ -386,7 +383,7 @@ ADC_MODE(ADC_VCC);
 void writeDefaultConfig() {
     LittleFS.remove("/config.json");
     File file = LittleFS.open("/config.json", "w");
-    file.print(F("{\"widgets\":[{\"xOff\":17,\"yOff\":11,\"type\":6,\"content\":\"Hello\",\"length\":1,\"borderColor\":\"0xFF0000\",\"backgroundColor\":\"0x00FFFF\",\"colors\":[\"0x00FF00\"],\"width\":30,\"height\":8}],\"brightnessMode\":0,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":\"0x00FFFF\",\"timezone\":\"eastern\",\"metric\":false,\"weatherKey\":\"\",\"weatherLocation\":\"5014227\"}"));
+    file.print(F("{\"widgets\":[{\"xOff\":17,\"yOff\":11,\"type\":4,\"transparent\":true,\"large\":true,\"content\":\"Hello\",\"colors\":[\"0x000000\"],\"width\":30,\"height\":8}],\"brightnessMode\":0,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":\"0x00FFFF\",\"timezone\":\"eastern\",\"metric\":false,\"weatherKey\":\"\",\"weatherLocation\":\"5014227\"}"));
     file.close();
 }
 
@@ -624,13 +621,29 @@ String getContentType(String filename) {
     return F("text/plain");
 }
 
-bool sendFile(String path) {
+int getHeaderCacheVersion() {
+    if (!server->hasHeader(F("If-None-Match")))
+        return -1;
+    for (int i = 0; i < server->headers(); i++ ) 
+        if (server->headerName(i).equals(F("If-None-Match")))
+            return server->header(i).toInt();
+    return -1;
+}
+
+bool sendFile(String path, bool cache = true) {
     if (path.endsWith(F("/")))
         return false;
     String existpath = path + (LittleFS.exists(path + ".gz") ? ".gz" : "");
-    Serial.printf("Serving: %s, %i\n", existpath.c_str(), LittleFS.exists(path));
     String contentType = getContentType(path);
     if (LittleFS.exists(existpath)) {
+        if (CACHE_DASHBOARD && cache) {
+            if (getHeaderCacheVersion() == dashboardVersion) {
+                server->send(304);
+                return true;
+            }
+            server->sendHeader(F("ETag"), String(dashboardVersion, 10));
+            server->sendHeader(F("Cache-Control"), F("no-cache")); 
+        }
         File file = LittleFS.open(existpath, "r");
         server->streamFile(file, contentType);
         file.close();
@@ -666,9 +679,9 @@ void serveConfig() {
             server->send(400, "text/plain", error);
         }
     } else {
-        if (!sendFile(F("/config.json"))) {
+        if (!sendFile(F("/config.json"), false)) {
             writeDefaultConfig();
-            sendFile(F("/config.json"));
+            sendFile(F("/config.json"), false);
         }
     }
 }
@@ -719,13 +732,6 @@ void serveStats() {
     serializeJson(doc, buf.get(), 300);
     server->send(200, "text/plain", buf.get());
 }
-
-/*uint8_t getDirectoryFileCount(Dir& dir) {
-    uint8_t count;
-    while(dir.next()) 
-        count++;
-    return count;
-}*/
 
 void writeDefaultImageData() {
     File dataFile = LittleFS.open(F("/imageData.json"), "w");
@@ -798,18 +804,13 @@ void serveImageData() {
     size_t size = 100 + (progmemImages.size() + fsImageData.size()) * 100;
     DynamicJsonDocument doc(size);
 
-    if (SERVE_PROGMEM_IMAGES)
-        for (auto const &entry : progmemImages) {
-            //if (entry.second.type != IMAGE_GIMP)
-            //    continue;
-            JsonObject o = doc.createNestedObject(entry.first.c_str());
-            o["width"] = entry.second.width;
-            o["height"] = entry.second.height;
-            o["length"] = entry.second.length;
-            o["type"] = entry.second.type;
-            o["progmem"] = true;
-            //doc[String(entry.first.c_str()) + "_P"] = o;
-            //doc.add(String(entry.first.c_str()) + "_P");
+    for (auto const &entry : progmemImages) {
+        JsonObject o = doc.createNestedObject(entry.first.c_str());
+        o["width"] = entry.second.width;
+        o["height"] = entry.second.height;
+        o["length"] = entry.second.length;
+        o["type"] = entry.second.type;
+        o["progmem"] = true;
         }
 
     for (auto const &entry : fsImageData) {
@@ -877,7 +878,7 @@ void serveImage() {
         server->sendHeader(F("Content-Transfer-Encoding"), F("binary"));
         server->send_P(200, "application/binary", (PGM_P) progmemImages[progmem].data, size);
     } else {
-        if (!sendFile("/images/" + image)) {
+        if (!sendFile("/images/" + image, false)) {
             Serial.printf("Image doesn't exist %s\n", image.c_str());
             server->send(404);
         }
@@ -925,6 +926,8 @@ void serveDeleteAllImages() {
 void serveResetConfiguration() {
     writeDefaultConfig();
     server->send(200);
+    delay(2000);
+    ESP.restart();
 }
 
 void serveFactoryReset() {
@@ -947,6 +950,13 @@ void setupWebserver() {
         server->send(200, "text/plain", "");
     });*/
     updateServer.setup(server);
+
+    // Track cache header
+    if (CACHE_DASHBOARD) {
+        const char * headerkeys[] = {"If-None-Match"} ;
+        size_t headerkeyssize = sizeof(headerkeys)/sizeof(char*);
+        server->collectHeaders(headerkeys, headerkeyssize);
+    }
 
     server->on(F("/config"), serveConfig);
     server->on(F("/beginUpdate"), startOTA);
@@ -1423,8 +1433,10 @@ void updateScreen(bool fullUpdate) {
         else
             drawScreen(displayBuffer, fullUpdate, true, false);
     }
-    drawScreen(display, fullUpdate, false, false);
-    display.showBuffer();
+    if (USE_DOUBLE_BUFFERING) {
+        drawScreen(display, fullUpdate, false, false);
+        display.showBuffer();
+    }
     drawScreen(display, fullUpdate, false, true);
 }
 
@@ -1442,12 +1454,12 @@ void updateBrightness() {
     uint16_t avg, constrained;
     switch (brightnessMode) {
         case BRIGHTNESS_AUTO:
-#if BRIGHTNESS_ROLLING_AVG_SIZE > 0
-            brightnessAverage.addValue(analogRead(BRIGHTNESS_SENSOR_PIN));
-            avg = brightnessAverage.getAverage();
-#else
-            avg = analogRead(BRIGHTNESS_SENSOR_PIN);
-#endif
+            if(BRIGHTNESS_ROLLING_AVG_SIZE > 0) {
+                brightnessAverage.addValue(analogRead(BRIGHTNESS_SENSOR_PIN));
+                avg = brightnessAverage.getAverage();
+            }
+            else
+                avg = analogRead(BRIGHTNESS_SENSOR_PIN);
             constrained = _min((uint16_t)_max(brightnessSensorDark, avg), brightnessSensorBright) - brightnessSensorDark;
             targetBrightness = constrained / ((float)_max(1, brightnessSensorBright - brightnessSensorDark)) * (float)(brightnessBright - brightnessDim) + brightnessDim;
             break;
@@ -1510,7 +1522,7 @@ void updateTime() {
 }
 
 void setupArduinoOTA() {
-#ifdef ENABLE_ARDUINO_OTA
+#if ENABLE_ARDUINO_OTA
     Serial.println("Starting Development OTA Server");
     ArduinoOTA.onStart([]() {
     String type;
@@ -1547,7 +1559,7 @@ void setupArduinoOTA() {
 }
 
 void updateArduinoOTA() {
-#ifdef ENABLE_ARDUINO_OTA
+#if ENABLE_ARDUINO_OTA
     ArduinoOTA.handle();
 #endif
 }
@@ -1568,12 +1580,18 @@ void setup() {
 #endif
     //display.setBrightness(1);
     //display.setFastUpdate(true);
-    display.setTextWrap(false);
     display.fillScreen(GREEN);
     display.showBuffer();
     display.fillScreen(GREEN);
 
     LittleFS.begin();
+    File versionFile = LittleFS.open("/version.txt", "r");
+    if (versionFile) {
+        dashboardVersion = versionFile.parseInt();
+       versionFile.close(); 
+    }
+    else
+        Serial.println(F("Failed to read version file."));
 
     WiFiManager wifiManager;
     wifiManager.setAPCallback(onStartAccessPoint);
@@ -1594,8 +1612,6 @@ void setup() {
     Serial.println(WiFi.localIP());
 
     std::string result;
-    //sendGetRequest2("http://httpbin.org/get", "", 10000, result);
-    //sendGetRequest2("https://www.googleapis.com/youtube/v3/channels?part=statistics&id=UCFKDEp9si4RmHFWJW1vYsMA&key=AIzaSyDKUk5KPDq7vTwrmbrFDcyJSNjYp52CJvk", "", 10000, result);
     Serial.println(result.c_str());
 
     // Development OTA
@@ -1627,6 +1643,8 @@ void setup() {
         }
         Serial.println(F("Successfully configured display"));
     }
+
+    display.setTextWrap(false);
 
     setSyncProvider([]() { return timezones[localTimezone]->toLocal(ntpClient->getRawTime()); });
     setSyncInterval(10);

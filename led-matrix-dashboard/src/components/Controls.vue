@@ -2,17 +2,8 @@
   <div>
     <md-card>
       <h1>Controls</h1>
-      <md-button class="md-accent md-raised" @click="sendCommand('/fullRefresh')">Send Full Display Refresh</md-button>
-      <md-button class="md-accent md-raised" @click="sendCommand('/restart')">Restart Display</md-button>
-      <md-button class="md-accent md-raised" @click="sendCommand('/deleteAllImages')">Delete all Images</md-button>
-      <md-button class="md-accent md-raised" @click="sendCommand('/resetConfiguration')">Reset Display Configuration</md-button>
-      <md-button class="md-accent md-raised" @click="sendCommand('/factoryReset')">Factory Reset Display</md-button>
+      <md-button v-for="(url, name) in commands" class="md-accent md-raised" @click="sendCommand(name)">{{ name }}</md-button>
     </md-card>
-
-    <md-dialog-alert
-        :md-active.sync="errorAlert"
-        md-content="Failed to send command to display"
-        md-confirm-text="Close"/>
   </div>
 </template>
 
@@ -20,17 +11,24 @@
 export default {
   name: "Controls",
   data: () => ({
-    errorAlert: false
+    commands: {
+      'Send Full Display Refresh': '/fullRefresh',
+      'Restart Display': '/restart',
+      'Delete all Images': '/deleteAllImages',
+      'Reset Display Configuration': '/resetConfiguration',
+      'Factory Reset Display': '/factoryReset'
+    }
   }),
   methods: {
-    sendCommand(url) {
-      this.$axios.post(url).then(response => {
-        if (response.status !== 200)
-          this.errorAlert = true;
-      }).catch(error => {
-        console.error(error)
-        this.errorAlert = true;
-      })
+    sendCommand(name) {
+      this.confirm(() => {
+        this.$axios.post(this.commands[name]).then(response => {
+          if (response.status !== 200)
+            this.error('Error', 'Failed to send command to display.')
+        }).catch(error => {
+          this.error('Error', 'Failed to send command to display: ' + error)
+        })
+      }, () => {}, 'Send Command', `Are you sure you want to send command '${name}'?`)
     }
   }
 }

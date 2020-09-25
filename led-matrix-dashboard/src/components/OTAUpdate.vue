@@ -15,20 +15,6 @@
           </md-field>
           <md-button class="md-accent md-raised" type="submit" :disabled="inProgress">Update</md-button>
         </form>
-
-        <md-snackbar :md-active.sync="errorSnackbar" md-persistent class="md-layout">
-          <span class="md-layout-item md-size-60"> {{ error }} </span>
-          <div class="md-layout-item md-size-40">
-            <md-button class="md-accent md-raised" @click="retry"> Retry</md-button>
-            <md-button class="md-accent md-raised" @click="errorSnackbar = false"> Close</md-button>
-          </div>
-
-        </md-snackbar>
-
-        <md-snackbar :md-active.sync="successSnackbar" md-persistent>
-          <span> Successfully updated display </span>
-          <md-button @click="successSnackbar = false"> Okay</md-button>
-        </md-snackbar>
       </md-card-content>
     </md-card>
   </div>
@@ -44,9 +30,6 @@ export default {
     progress: -1,
     binary: null,
     inProgress: false,
-    errorSnackbar: false,
-    error: '',
-    successSnackbar: false,
     file: ''
   }),
   methods: {
@@ -59,8 +42,7 @@ export default {
         return
       }*/
       if (!this.binary) {
-        this.error = 'A binary file is required'
-        this.errorSnackbar = true;
+        this.error('Error', 'A binary file is required')
         return
       }
 
@@ -81,22 +63,17 @@ export default {
           this.inProgress = false;
           this.progress = -1;
           this.file = ''
-          this.successSnackbar = true
-          //alert(response.data)
-          //this.$router.push('/dashboard')
+          this.info('Success', 'Successfully updated display')
         }).catch(error => {
           this.inProgress = false;
           this.progress = -1;
-          this.error = 'Failed to update display: ' + error
-          this.errorSnackbar = true;
+          this.error('Error', 'Failed to update display: ' + error)
         })
       }).catch(error => {
-        this.error = 'Failed to update display: ' + error
-        this.errorSnackbar = true;
+        this.error('Error', 'Failed to update display: ' + error)
       })
     },
     retry() {
-      this.errorSnackbar = false
       this.submit()
     },
     onUploadProgress(event) {
@@ -110,14 +87,10 @@ export default {
     }
   },
   beforeRouteLeave(to, from, next) {
-    if (this.inProgress) {
-      if (window.confirm('Are you really sure you want to leave during an update? This might corrupt the display firmware.'))
-        next()
-      else
-        next(false)
-    } else {
+    if (!this.inProgress || window.confirm('Are you really sure you want to leave during an update? This might corrupt the display firmware.'))
       next()
-    }
+    else
+      next(false)
   },
   mounted() {
     window.addEventListener('beforeunload', this.onCloseAttempt, false)

@@ -3,6 +3,10 @@
     <link rel="stylesheet" href="//fonts.googleapis.com/css?family=Roboto:400,500,700,400italic|Material+Icons">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
 
+    <div class="backdrop" v-if="$store.state.backdrop"></div>
+
+    <vue-snotify></vue-snotify>
+
     <md-app>
       <md-app-toolbar class="md-primary" md-elevation="0">
         <md-button class="md-icon-button" @click="toggleSidebar" v-if="!sidebar">
@@ -110,6 +114,8 @@ export default {
 </script>
 
 <style>
+@import "~vue-snotify/styles/material.css";
+
 #app {
   font-family: Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -132,7 +138,52 @@ img {
   image-rendering: crisp-edges;
 }
 
+.backdrop {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 500;
+}
+
 .md-app {
   height: 100vh;
+}
+
+.bounceInDown {
+  animation-name: bounceInDown;
+}
+
+@keyframes bounceInDown {
+  0%, 60%, 75%, 90%, 100% {
+    transition-timing-function: cubic-bezier(0.215, 0.610, 0.355, 1.000);
+  }
+
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -3000px, 0) scaleY(5);
+  }
+
+  60% {
+    opacity: 1;
+    transform: translate3d(0, 25px, 0) scaleY(.9);
+  }
+
+  75% {
+    transform: translate3d(0, -10px, 0) scaleY(.95);
+  }
+
+  90% {
+    transform: translate3d(0, 5px, 0) scaleY(.985);
+  }
+
+  100% {
+    opacity: 1;
+    transform: none;
+  }
 }
 </style>

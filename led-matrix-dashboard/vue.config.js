@@ -1,4 +1,5 @@
 const CompressionPlugin = require('compression-webpack-plugin');
+
 let assetsDir = "assets";
 module.exports = {
   configureWebpack: {
