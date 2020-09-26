@@ -52,8 +52,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          hub release edit -a ./firmware-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ github.ref }}
-          hub release edit -a ./fs-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ github.ref }}
+          hub release edit -a ./firmware-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
+          hub release edit -a ./fs-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
         
       #- name: Upload Release Firmware Binary esp8266-4m-32x64
         #uses: actions/upload-release-asset@v1
