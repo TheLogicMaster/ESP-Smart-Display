@@ -6,7 +6,7 @@
 /led-matrix-display/data
 /led-matrix-dashboard/demo
 .DS_Store
-/node_modules
+/led-matrix-dashboard/node_modules
 /led-matrix-dashboard/dist
 
 

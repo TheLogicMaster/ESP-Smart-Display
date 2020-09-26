@@ -19,7 +19,7 @@ jobs:
         
       - name: Zip Source Code
         run: |
-          zip -r -j source-${{ steps.get_version.outputs.VERSION }}.zip .
+          zip -r source-${{ steps.get_version.outputs.VERSION }}.zip .
           
       - name: Build Dashboard 🔧
         run: |
