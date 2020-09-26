@@ -60,7 +60,7 @@ To use Arduino IDE, the following libraries must be installed through the librar
 * Timezone
 * RunningAverage (If using brightness sensor "rolling" average)
 
-The [ESP8266 FS plugin](https://arduino-esp8266.readthedocs.io/en/latest/filesystem.html#uploading-files-to-file-system)
+The [ESP8266 FS plugin](https://github.com/earlephilhower/arduino-esp8266littlefs-plugin)
 is also needed to upload the web interface. 
 
 ### Platformio

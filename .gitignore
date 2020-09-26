@@ -3,7 +3,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-/data
+/led-matrix-display/data
 /led-matrix-dashboard/demo
 .DS_Store
 /node_modules

@@ -12,7 +12,7 @@ find ./dist -type f \( ! -iname \*.gz \) -exec gzip -f {} \;
 find ./dist -type f \( ! -iname \*.gz \) -exec rm {} \;
 find ./dist -type f \( -iname \*.map.gz \) -exec rm {} \;
 echo $(grep DASHBOARD_VERSION .env | cut -d '=' -f2) >> ./dist/version.txt
-rm -r ../data
-mkdir ../data
-cp -r ./dist/* ../data
+rm -r ../led-matrix-display/data
+mkdir ../led-matrix-display/data
+cp -r ./dist/* ../led-matrix-display/data
 echo Done
