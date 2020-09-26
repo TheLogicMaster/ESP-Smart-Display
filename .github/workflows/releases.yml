@@ -17,10 +17,6 @@ jobs:
         id: get_version
         run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/}
         
-      - name: Zip Source Code
-        run: |
-          zip -r source-${{ steps.get_version.outputs.VERSION }}.zip .
-          
       - name: Build Dashboard 🔧
         run: |
           ./install-dependencies.sh
@@ -35,7 +31,7 @@ jobs:
     
       - name: Build PlatformIO Binaries
         run: |
-          platformio run -e esp8266-4m-32x64 # Weird bug where have to run twice with .ino source files
+          #platformio run -e esp8266-4m-32x64 # Weird bug where have to run twice with .ino source files, doesn't seem to happen with GH Actions
           platformio run -e esp8266-4m-32x64
           platformio run -e esp8266-4m-32x64 -t buildfs
           mv ./.pio/build/esp8266-4m-32x64/firmware.bin ./firmware-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin
@@ -51,16 +47,6 @@ jobs:
           release_name: Release ${{ github.ref }}
           draft: false
           prerelease: false
-          
-      - name: Upload Release Source
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./source-${{ steps.get_version.outputs.VERSION }}.zip
-          asset_name: Source Code (zip)
-          asset_content_type: application/zip 
           
       - name: Upload Release Firmware Binary esp8266-4m-32x64
         uses: actions/upload-release-asset@v1
