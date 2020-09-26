@@ -130,6 +130,7 @@ export default {
               yOff: 23,
               width: 32,
               height: 9,
+              frequency: 100,
               colors: ['0x000000'],
               transparent: true
             }
