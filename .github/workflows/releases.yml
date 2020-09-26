@@ -47,23 +47,30 @@ jobs:
           release_name: Release ${{ github.ref }}
           draft: false
           prerelease: false
-          
-      - name: Upload Release Firmware Binary esp8266-4m-32x64
-        uses: actions/upload-release-asset@v1
+      
+      - name: Upload Binaries
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./firmware-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin
-          asset_name: ESP8266 4M 32x64 Firmware(bin)
-          asset_content_type: application/octet-stream
+        run: |
+          hub release edit -a ./firmware-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "$tag_name" "$tag_name"
+          hub release edit -a ./fs-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "$tag_name" "$tag_name"
+        
+      #- name: Upload Release Firmware Binary esp8266-4m-32x64
+        #uses: actions/upload-release-asset@v1
+        #env:
+          #GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        #with:
+          #upload_url: ${{ steps.create_release.outputs.upload_url }}
+          #asset_path: ./firmware-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin
+          #asset_name: ESP8266 4M 32x64 Firmware(bin)
+          #asset_content_type: application/octet-stream
           
-      - name: Upload Release FS Binary esp8266-4m-32x64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./fs-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin
-          asset_name: ESP8266 4M 32x64 Firmware(bin)
-          asset_content_type: application/octet-stream
+      #- name: Upload Release FS Binary esp8266-4m-32x64
+        #uses: actions/upload-release-asset@v1
+        #env:
+          #GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        #with:
+          #upload_url: ${{ steps.create_release.outputs.upload_url }}
+          #asset_path: ./fs-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin
+          #asset_name: ESP8266 4M 32x64 Firmware(bin)
+          #asset_content_type: application/octet-stream
