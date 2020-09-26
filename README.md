@@ -114,7 +114,7 @@ location need to be configured on the *Settings* page.
 This is a scalable widget that draws a clock based on the current time.
 
 ## Firmware Customization
-It's recommended to use Platformio if you are planning in customizing the firmware.
+It's recommended to use Platformio if you are planning on customizing the firmware.
 ### Flags
 The flags are all documented in the source code. The following flags are configured in the platformio.ini file if using
 Platformio.

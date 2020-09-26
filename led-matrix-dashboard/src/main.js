@@ -325,7 +325,9 @@ Vue.mixin({
 
       store.commit('set', ['loadingImage', image])
       try {
-        const response = await axios.get(`/image${Vue.prototype.$demoMode ? '/' + image : ''}`, {
+        if (Vue.prototype.$demoMode)
+          console.log('Loading demo image')
+        const response = await axios.get('/image' + (Vue.prototype.$demoMode ? '/' + image : ''), {
           responseType: store.state.imageData[image].type === 2 ? 'text' : 'arraybuffer',
           params: {image: image + (store.state.imageData[image].progmem ? '_P' : '')}
         })
