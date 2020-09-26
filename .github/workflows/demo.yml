@@ -14,6 +14,7 @@ jobs:
           cd ./led-matrix-dashboard
           npm install
           npm run build
+          cp -r ./demo-assets/* ./dist
         env: 
           VUE_APP_DEMO_MODE: true
 
