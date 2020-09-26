@@ -23,8 +23,8 @@ jobs:
           
       - name: Build Dashboard 🔧
         run: |
-          ./install-dependencies
-          ./build-dashboard
+          ./install-dependencies.sh
+          ./build-dashboard.sh
           
       - name: Set up Python
         uses: actions/setup-python@v1
