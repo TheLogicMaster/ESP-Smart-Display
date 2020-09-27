@@ -27,6 +27,25 @@
           </md-select>
         </md-field>
         <md-field>
+          <label>Scan Pattern</label>
+          <md-select v-model.number="config.scanPattern">
+            <md-option :value="0">LINE</md-option>
+            <md-option :value="1">ZIGZAG</md-option>
+            <md-option :value="2">ZZAGG</md-option>
+            <md-option :value="3">ZAGGIZ</md-option>
+            <md-option :value="4">WZAGZIG</md-option>
+            <md-option :value="5">VZAG</md-option>
+            <md-option :value="6">ZAGZIG</md-option>
+          </md-select>
+        </md-field>
+        <md-field>
+          <label>Mux Pattern</label>
+          <md-select v-model.number="config.muxPattern">
+            <md-option :value="0">BINARY</md-option>
+            <md-option :value="1">STRAIGHT</md-option>
+          </md-select>
+        </md-field>
+        <md-field>
           <label>Brightness Mode</label>
           <md-select v-model.number="config.brightnessMode">
             <md-option :value="0">Static</md-option>

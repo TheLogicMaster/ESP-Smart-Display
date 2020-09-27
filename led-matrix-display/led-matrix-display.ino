@@ -1,31 +1,4 @@
-// Library files
 #include <Arduino.h>
-#include <LittleFS.h>
-#include <ArduinoJson.h>
-#include <ESP_DoubleResetDetector.h>
-#include <ESP8266WiFi.h>
-#include <DNSServer.h>
-#include <ESP8266WebServer.h>
-#include <WiFiManager.h>
-#include <NTPClient.h>
-#include <TimeLib.h>
-#include <map>
-#include <JsonListener.h>
-#include <OpenWeatherMapForecast.h>
-#include <Timezone.h>
-#include <ESP8266HTTPClient.h>
-#include <ESP8266HTTPUpdateServer.h>
-#include <SunMoonCalc.h>
-
-// Source files
-#include "TinyFont.h"
-#include "TinyIcons.h"
-#include "Structures.h"
-
-// Images
-#include "BLM.h"
-#include "Taz.h"
-#include "Mario.h"
 
 #pragma region Constants
 
@@ -63,27 +36,58 @@
 #define WEATHER_UPDATE_INTERVAL 3600000 // Every Hour update the weather if using any weather widgets
 #define NTP_UPDATE_INTERVAL 3700000 // Just over every hour to avoid large update delays
 #define PIXEL_YIELD_THRESHOLD 100 // Might not be necisary, yields while drawign images larger than 10 by 10
-#define PROFILE_RENDERING false // Enable to log rendering times
 #define BRIGHTNESS_UPDATE_INTERVAL 10 // Millis between brightness increments
 #define SUN_UPDATE_INTERVAL 7200000 // Every 2 hours, since sun won't rise within 2 hours of date change
 #define BRIGHTNESS_SENSOR_PIN A0 // The pin to get photoresistor value from, if using
-#define USE_BRIGHTNESS_SENSOR true // Disables Vcc reading functionality to use brightness sensor
 #define BRIGHTNESS_ROLLING_AVG_SIZE 10 // Higher value makes transition smoother, 4 bytes per buffer value, zero for no buffer
 #define HTTPS_TRANSMIT_BUFFER 512 // Limit HTTPS buffers to prevent HTTPS GET requests all failing
 #define HTTPS_RECEIVE_BUFFER 1024
-#define ENABLE_ARDUINO_OTA false // LAN based OTA, but doesn't work for FS updates
-#define USE_DOUBLE_BUFFERING true // Only disable if pressed for memory, will cause visual glitches/partial rendering
-#define CACHE_DASHBOARD true // Shouldn't cause issues, with dashboard version checking
 
-// Configuration Flags
+// Configuration Values
+#ifndef USE_BRIGHTNESS_SENSOR
+#define USE_BRIGHTNESS_SENSOR true // Disables Vcc reading functionality to use brightness sensor
+#endif
+#ifndef PROFILE_RENDERING
+#define PROFILE_RENDERING false // Enable to log rendering times
+#endif
+#ifndef ENABLE_ARDUINO_OTA
+#define ENABLE_ARDUINO_OTA false // LAN based OTA, but doesn't work for FS updates
+#endif
+#ifndef USE_DOUBLE_BUFFERING
+#define USE_DOUBLE_BUFFERING true // Only disable if pressed for memory, will cause visual glitches/partial rendering
+#endif
+#ifndef CACHE_DASHBOARD
+#define CACHE_DASHBOARD true // Shouldn't cause issues, with dashboard version checking
+#endif
+#ifndef USE_SUNRISE
+#define USE_SUNRISE true // Disable to save space if Subrise brightness mode isn't needed
+#endif
+#ifndef USE_OTA_UPDATING
+#define USE_OTA_UPDATING true // Disable to save space if OTA updating isn't needed
+#endif
+#ifndef USE_HTTPS
+#define USE_HTTPS true // Disable if only http GET requests are needed space
+#endif
+#ifndef USE_PROGMEM_IMAGES
+#define USE_PROGMEM_IMAGES true // Disable if firmware images aren't needed to save space
+#endif
+#ifndef USE_WEATHER
+#define USE_WEATHER true // Disable to save space if weather widgets aren't needed
+#endif
 #ifndef VERSION_CODE
 #define VERSION_CODE 0
 #endif
+#ifndef BOARD_NAME
+#define BOARD_NAME "nodemcuv2" // Used to identify OTA update binaries
+#endif
 #ifndef DISPLAY_WIDTH
-#define DISPLAY_WIDTH 64
+#define DISPLAY_WIDTH 64 // The width of the display
 #endif
 #ifndef DISPLAY_HEIGHT
-#define DISPLAY_HEIGHT 32
+#define DISPLAY_HEIGHT 32 // The height of the display
+#endif
+#ifndef DISPLAY_PANELS
+#define DISPLAY_PANELS 1 // The number of total panels being horizontally chained
 #endif
 #if ENABLE_ARDUINO_OTA
 #include <ArduinoOTA.h>
@@ -95,6 +99,40 @@
 #endif
 
 #pragma endregion
+
+// Source files
+#include <LittleFS.h>
+#include <ArduinoJson.h>
+#include <ESP_DoubleResetDetector.h>
+#include <ESP8266WiFi.h>
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
+#include <WiFiManager.h>
+#include <NTPClient.h>
+#include <TimeLib.h>
+#include <map>
+#if USE_WEATHER
+#include <JsonListener.h>
+#include <OpenWeatherMapForecast.h>
+#include "TinyIcons.h"
+#endif
+#include <Timezone.h>
+//#include <ESP8266HTTPClient.h>
+#if USE_OTA_UPDATING
+#include <ESP8266HTTPUpdateServer.h>
+#endif
+#if USE_SUNRISE
+#include <SunMoonCalc.h>
+#endif
+#include "TinyFont.h"
+#include "Structures.h"
+
+// Images
+#if USE_PROGMEM_IMAGES
+#include "BLM.h"
+#include "Taz.h"
+#include "Mario.h"
+#endif
 
 TimeChangeRule EDT = {"EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
 TimeChangeRule EST = {"EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
@@ -142,19 +180,19 @@ portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
 #include <Ticker.h>
 Ticker display_ticker;
-#define P_LAT 16
-#define P_A 5
-#define P_B 4
-#define P_C 15
-#define P_D 12
-#define P_E 0
-#define P_OE 2
+#define P_LAT D0
+#define P_A D1
+#define P_B D2
+#define P_C D8
+#define P_D D6
+#define P_E D3
+#define P_OE D4
 
 #endif
 
 //PxMATRIX display(64, 32, P_LAT, P_OE, P_A, P_B, P_C, P_D, P_E);
 //PxMATRIX display(32,16,P_LAT, P_OE,P_A,P_B,P_C);
-PxMATRIX display(64, 32, P_LAT, P_OE, P_A, P_B, P_C, P_D);
+PxMATRIX display(64, 32, P_LAT, P_OE, P_A, P_B, P_C, P_D, P_E);
 //PxMATRIX display(64,64,P_LAT, P_OE,P_A,P_B,P_C,P_D,P_E);
 
 #ifdef ESP8266
@@ -279,9 +317,13 @@ public:
     }
 };
 
-std::map <std::string, ProgmemImage> progmemImages = {{"taz",  {23, 28, 1,  IMAGE_UINT16, taz}},
-                                                      {"blm",  {64, 32, 36, IMAGE_UINT8,  blmAnimations}},
-                                                      {"mario",  {64, 32, 1, IMAGE_UINT16,  mario}}};
+std::map <std::string, ProgmemImage> progmemImages = {
+#if USE_PROGMEM_IMAGES
+                                                     {"taz",  {23, 28, 1,  IMAGE_UINT16, taz}},
+                                                     {"blm",  {64, 32, 36, IMAGE_UINT8,  blmAnimations}},
+                                                     {"mario",  {64, 32, 1, IMAGE_UINT16,  mario}}
+#endif
+                                                     };
 
 // Configuration values
 std::vector <Widget> widgets;
@@ -324,6 +366,8 @@ uint8_t targetBrightness;
 uint8_t currentBrightness = 100;
 time_t sunRiseTime;
 time_t sunSetTime;
+uint8_t scanPattern;
+uint8_t muxPattern;
 
 #if BRIGHTNESS_ROLLING_AVG_SIZE > 0
 #include <RunningAverage.h>
@@ -332,9 +376,13 @@ RunningAverage brightnessAverage(BRIGHTNESS_ROLLING_AVG_SIZE);
 
 DoubleResetDetector drd(10, 0);
 ESP8266WebServer *server;
+#if USE_OTA_UPDATING
 ESP8266HTTPUpdateServer updateServer(true);
+#endif
 NTPClient *ntpClient;
+#if USE_WEATHER
 OpenWeatherMapForecast weatherClient;
+#endif
 DisplayBuffer displayBuffer(DISPLAY_WIDTH, DISPLAY_HEIGHT);
 
 #if !USE_BRIGHTNESS_SENSOR
@@ -405,6 +453,8 @@ bool parseConfig(char data[], String& errorString) {
     tempBrightnessDimMin = darkTime.substring(3, 5).toInt();
     double tempLongitude = doc["longitude"];
     double tempLattitude = doc["lattitude"];
+    uint8_t tempScanPattern = doc["scanPattern"];
+    uint8_t tempMuxPattern = doc["muxPattern"];
 
     bool tempUsingWeather = false;
     std::vector <Widget> tempWidgets;
@@ -445,12 +495,9 @@ bool parseConfig(char data[], String& errorString) {
                         return false;
                     }
                     break;
-                //case WIDGET_TEXT_BIG:
                 case WIDGET_TEXT:
                 case WIDGET_TEXT_GET_JSON:
-                //case WIDGET_TEXT_GET_JSON_BIG:
                 case WIDGET_TEXT_GET:
-                //case WIDGET_TEXT_GET_BIG:
                     if (c.size() < 1) {
                         errorString.concat(F("Text require 1 color argument"));
                         return false;
@@ -506,8 +553,12 @@ bool parseConfig(char data[], String& errorString) {
     usingTransparency = tempTransparency;
     lattitude = tempLattitude;
     longitude = tempLongitude;
+    muxPattern = tempMuxPattern;
+    scanPattern = tempScanPattern;
 
     display.setFastUpdate(fastUpdate);
+    display.setMuxPattern(static_cast<mux_patterns>(muxPattern));
+    display.setScanPattern(static_cast<scan_patterns>(scanPattern));
 
     weatherUpdateTime = 0;
     sunMoonTime = 0;
@@ -682,6 +733,7 @@ void serveStats() {
     doc["transparencyBuffer"] = displayBuffer.isAllocated();
     FSInfo info;
     LittleFS.info(info);
+    doc["platform"] = BOARD_NAME;
     doc["filesystemUsed"] = info.usedBytes;
     doc["filesystemTotal"] = info.totalBytes;
     doc["maxOpenFiles"] = info.maxOpenFiles;
@@ -691,8 +743,8 @@ void serveStats() {
     doc["vcc"] = ESP.getVcc();
     doc["brightness"] = currentBrightness;
     doc["brightnessSensor"] = analogRead(BRIGHTNESS_SENSOR_PIN);
-    std::unique_ptr<char[]> buf(new char[300]);
-    serializeJson(doc, buf.get(), 300);
+    std::unique_ptr<char[]> buf(new char[350]);
+    serializeJson(doc, buf.get(), 350);
     server->send(200, "text/plain", buf.get());
 }
 
@@ -912,7 +964,9 @@ void setupWebserver() {
         server->sendHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
         server->send(200, "text/plain", "");
     });*/
+    #if USE_OTA_UPDATING
     updateServer.setup(server);
+    #endif
 
     // Track cache header
     if (CACHE_DASHBOARD) {
@@ -1077,7 +1131,14 @@ bool sendGetRequest(std::string url, std::string auth, uint16_t timeout, bool js
         port = strtoul(hostPort.substr(hostEnd + 1).c_str(), NULL, 10);
 
     std::unique_ptr<WiFiClient> clientPtr;
-    clientPtr.reset((ssl ? new WiFiClientSecure() : new WiFiClient()));
+    
+#if USE_HTTPS
+    clientPtr.reset(ssl ? new WiFiClientSecure() : new WiFiClient());
+#else
+    if (ssl)
+        return false;
+    clientPtr.reset(new WiFiClient());
+#endif
     WiFiClient* client = clientPtr.get();
     if (ssl) {
         WiFiClientSecure* secureClient = (WiFiClientSecure*)client;
@@ -1237,12 +1298,10 @@ void updateWidget(Widget &widget) {
         case WIDGET_FS_IMAGE:
             incrementWidgetState(widget);
             break;
-        //case WIDGET_TEXT_GET_JSON_BIG:
         case WIDGET_TEXT_GET_JSON:
             updateTextGETWidgetJson(widget);
             break;
         case WIDGET_TEXT_GET:
-        //case WIDGET_TEXT_GET_BIG:
             updateTextGETWidget(widget);
             break;
         case WIDGET_WEATHER_ICON:
@@ -1250,10 +1309,8 @@ void updateWidget(Widget &widget) {
             break;
         case WIDGET_ANALOG_CLOCK:
         case WIDGET_CLOCK:
-        //case WIDGET_CLOCK_BIG:
             updateClockWidget(widget);
             break;
-        //case WIDGET_TEXT_BIG:
         case WIDGET_TEXT:
             break;
         default:
@@ -1346,7 +1403,9 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
                         widget.contentType);
             break;*/
         case WIDGET_WEATHER_ICON:
+#if USE_WEATHER
             TIDrawIcon(d, weatherID, widget.xOff + _max(0, (widget.width - 10 + 1) / 2), widget.yOff + (widget.height - 5) / 2, widget.state, true, widget.transparent, widget.backgroundColor);
+#endif
             break;
         default:
             Serial.print(F("Invalid widget type: "));
@@ -1452,6 +1511,7 @@ void updateWeather() {
         return;
     weatherUpdateTime = millis();
 
+#if USE_WEATHER
     OpenWeatherMapForecastData data[1];
     weatherClient.setMetric(metric);
     weatherClient.setLanguage(F("en"));
@@ -1465,16 +1525,20 @@ void updateWeather() {
     }
 
     weatherID = data[0].weatherId;
+#endif
 }
 
 void updateSunMoon() {
     if (!usingSunMoon || (sunMoonTime != 0 && millis() - sunMoonTime < SUN_UPDATE_INTERVAL))
         return;
     sunMoonTime = millis();
+
+    #if USE_SUNRISE
     SunMoonCalc sunMoonCalc = SunMoonCalc(now(), lattitude, longitude);
     SunMoonCalc::Sun sun = sunMoonCalc.calculateSunAndMoonData().sun;
     sunRiseTime = timezones[localTimezone]->toLocal(sun.rise);
     sunSetTime = timezones[localTimezone]->toLocal(sun.set);
+    #endif
 }
 
 void updateTime() {
@@ -1542,7 +1606,7 @@ void setup() {
     timerAlarmEnable(timer);
 #endif
     //display.setBrightness(1);
-    //display.setFastUpdate(true);
+    display.setPanelsWidth(DISPLAY_PANELS);
     display.fillScreen(GREEN);
     display.showBuffer();
     display.fillScreen(GREEN);
@@ -1562,7 +1626,6 @@ void setup() {
     if (drd.detectDoubleReset()) {
         Serial.println(F("Double reset detected, entering config mode"));
         wifiManager.startConfigPortal("LED Matrix Display");
-        //needsConfig = true;
     } else {
         Serial.println(F("Attemping to connect to network..."));
         display.print(F("Connecting..."));

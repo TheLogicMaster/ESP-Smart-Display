@@ -31,11 +31,11 @@ jobs:
     
       - name: Build PlatformIO Binaries
         run: |
-          #platformio run -e esp8266-4m-32x64 # Weird bug where have to run twice with .ino source files, doesn't seem to happen with GH Actions
-          platformio run -e esp8266-4m-32x64
-          platformio run -e esp8266-4m-32x64 -t buildfs
-          mv ./.pio/build/esp8266-4m-32x64/firmware.bin ./firmware-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin
-          mv ./.pio/build/esp8266-4m-32x64/littlefs.bin ./fs-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin
+          platformio run -e nodemcu-32x64 -e d1-mini-32x64
+          platformio run -e nodemcu-32x64 -t buildfs
+          mv ./.pio/build/nodemcu-32x64/firmware.bin ./firmware-nodemcu-32x64-${{ steps.get_version.outputs.VERSION }}.bin
+          mv ./.pio/build/d1-mini-32x64/firmware.bin ./firmware-d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin
+          mv ./.pio/build/nodemcu-32x64/littlefs.bin ./fs-4m-${{ steps.get_version.outputs.VERSION }}.bin
           
       - name: Create Release
         id: create_release
@@ -52,25 +52,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          hub release edit -a ./firmware-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
-          hub release edit -a ./fs-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
-        
-      #- name: Upload Release Firmware Binary esp8266-4m-32x64
-        #uses: actions/upload-release-asset@v1
-        #env:
-          #GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        #with:
-          #upload_url: ${{ steps.create_release.outputs.upload_url }}
-          #asset_path: ./firmware-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin
-          #asset_name: ESP8266 4M 32x64 Firmware(bin)
-          #asset_content_type: application/octet-stream
-          
-      #- name: Upload Release FS Binary esp8266-4m-32x64
-        #uses: actions/upload-release-asset@v1
-        #env:
-          #GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        #with:
-          #upload_url: ${{ steps.create_release.outputs.upload_url }}
-          #asset_path: ./fs-esp8266-4m-32x64-${{ steps.get_version.outputs.VERSION }}.bin
-          #asset_name: ESP8266 4M 32x64 Firmware(bin)
-          #asset_content_type: application/octet-stream
+          hub release edit -a ./firmware-nodemcu-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
+          hub release edit -a ./firmware-d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
+          hub release edit -a ./fs-4m-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}

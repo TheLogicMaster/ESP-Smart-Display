@@ -76,9 +76,14 @@
 <script>
 export default {
   name: 'App',
-  mounted() {
+  async mounted() {
     this.$Progress.finish()
     this.isMobile = this.$isMobile()
+    if (await this.checkForUpdate())
+      this.$snotify.info('A new version of the firmware is available', 'Update Available', {
+        closeOnClick: true,
+        timeout: 0
+      })
   },
   data: () => ({
     sidebar: false,

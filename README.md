@@ -28,7 +28,10 @@ be fully functional.
 Currently, only ESP8266 is supported, but ESP32 support is planned. 4MB of RAM is required to use both the web dashboard
 and OTA updates. This was developed primarily on a P3 32x64 panel, but other sizes should be supported. Wiring is required to
 be like [this](https://www.instructables.com/id/Morphing-Digital-Clock/). A photoresistor/resistor is supported on pin 
-A0 in [this](https://www.instructables.com/id/NodeMCU-With-LDR/) configuration to control the display brightness.
+A0 in [this](https://www.instructables.com/id/NodeMCU-With-LDR/) configuration to control the display brightness. There 
+are pre-configured Platformio environments for Wemos D1 Mini, NodeMCU V2, and the Wemos D1 Mini Lite. Pre-built update
+binaries are availible for D1 Mini and NodeMCU V2. The D1 Mini Lite has 1MB of flash memory, so OTA updates are not 
+supported and features like HTTPS and built-in images are disabled.
 
 ## Installation
 The release binaries could be manually flashed using [esptool](https://github.com/espressif/esptool), but flashing the
@@ -36,7 +39,8 @@ filesystem binary would require board specific parameters, which would be a hass
 IDE after downloading the latest [release](https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest).
 The flash memory split for the program and filesystem is 50/50 for a 4MB board, where 1MB is for the program, 1MB is for
 firmware OTA updates, and 2MB is for the LittleFS filesystem. For platformio, this means the `eagle.flash.4m2m.ld` ld
-script. For Arduino, use the `4MB (FS: 2MB)` flashing option.
+script. For Arduino IDE, use the `4MB (FS: 2MB)` flashing option. For 1MB boards, Platformio is probably required, as it
+doesn't look like Arduino IDE has an option to not use flash for OTA. 
 
 ### Building the Web Dashboard
 The dashboard is built and moved to the data directory by running the following scripts in the project directory. This
@@ -64,8 +68,8 @@ To use Arduino IDE, the following libraries must be installed through the librar
 The ESP8266 board support must be installed from 
 [here](https://github.com/esp8266/Arduino#installing-with-boards-manager).
 The [ESP8266 FS plugin](https://github.com/earlephilhower/arduino-esp8266littlefs-plugin)
-is also needed to upload the web interface. First upload the code to the board, then select *FS Data Upload* under
-*Tools*.
+is also needed to upload the web interface. Select the correct board and flash split for your board. First upload the
+code to the board, then select *FS Data Upload* under *Tools*.
 
 ### Platformio
 To use [Platformio](https://docs.platformio.org/), install it and configure platformio.ini to suit the display size and
@@ -79,7 +83,11 @@ hosted on port 80, so enter the address in any browser. After saving any configu
 display will update and show the new content. [DoubleResetDetector](https://github.com/datacute/DoubleResetDetector) 
 is used to detect two restarts within ten seconds of each other, at which point the WiFi configuration AP will start
 again. The configuration screen is always displayed after setting up the WiFi connection, if you want to determine
-the display's IP. Static IP configuration is not available yet.
+the display's IP. Static IP configuration is not available yet. If the display isn't displaying correctly after flashing
+the firmware, the default PxMatrix parameters may be incorrect for your display. In this case, either determine the IP
+of the display using a serial monitor with baud rate 115200 or your router. Once connected to the display dashboard,
+try changing the mux and scan patterns under *Settings*. If this doesn't fix it, the wiring may be incorrect or the 
+firmware wasn't correct for your board, causing incorrect pin assignments. 
 
 ## Web Dashboard
 Vue is used to create a SPA webpage that is hosted on the ESP8266. All files are compressed and it takes up about
@@ -152,14 +160,15 @@ based or basic auth could be a future feature.
 
 ## Firmware Customization
 It's recommended to use Platformio if you are planning on customizing the firmware.
-### Flags
-The flags are all documented in the source code. The following flags are configured in the platformio.ini file if using
-Platformio.
+### Definitions
+The definitions are all documented in the source code. The following definitions are configured in the platformio.ini 
+file if using Platformio. Just change the source definitions in Arduino IDE.
 * **VERSION_CODE:** This is used to update dashboard browser caches and ensure that the dashboard version always
 matches the firmware version so that hopefully no broken configurations occur. 
 * **DISPLAY_WIDTH:** The width of the display. Used for buffer sizes and configuration thresholds.
 * **DISPLAY_HEIGHT:** The height of the display.
-* **DEBUGGING:** Enables more verbose logging of display events to the serial port
+* **DISPLAY_PANELS:** The total number of chained horizontal panels.
+* **DEBUGGING:** Enables more verbose logging of display events to the serial port.
 ### Optional Features
 * **Brightness Sensor:** If the brightness sensor is enabled, the Vcc measurement is disabled. If the brightness rolling
 average is disabled, a bit of memory will be saved and the display will immediately respond to brightness changes. This

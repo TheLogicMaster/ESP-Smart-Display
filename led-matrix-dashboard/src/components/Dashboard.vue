@@ -4,6 +4,10 @@
       <h1>Dashboard</h1>
       <md-list>
         <md-list-item class="md-layout md-gutter md-alignment-center-center">
+          <b class="md-list-item stat-name"> Board Name </b>
+          <div class="md-list-item stat-value"> {{ $store.state.stats['platform'] }}</div>
+        </md-list-item>
+        <md-list-item class="md-layout md-gutter md-alignment-center-center">
           <b class="md-list-item stat-name"> Uptime </b>
           <div class="md-list-item stat-value"> {{ [this.$store.state.stats['uptime'], 'seconds'] | duration('humanize', false) }}</div>
         </md-list-item>
@@ -13,11 +17,11 @@
         </md-list-item>
         <md-list-item class="md-layout md-gutter md-alignment-center-center">
           <b class="md-list-item stat-name"> Firmware Version </b>
-          <div class="md-list-item stat-value"> v{{ this.$store.state.stats['version'] }}</div>
+          <div v-bind:style="{color: $store.state.latestVersion === $store.state.stats['version'] ? '#000000' : '#ff0000'}" class="md-list-item stat-value"> v{{ this.$store.state.stats['version'] }}</div>
         </md-list-item>
         <md-list-item class="md-layout md-gutter md-alignment-center-center">
           <b class="md-list-item stat-name"> Dashboard Version </b>
-          <div v-bind:style="{color: $store.state.stats['version'] === this.$dashboardVersion ? '#000000' : '#ff0000'}" class="md-list-item stat-value"> v{{ $dashboardVersion }}</div>
+          <div v-bind:style="{color: $store.state.latestVersion === this.$dashboardVersion ? '#000000' : '#ff0000'}" class="md-list-item stat-value"> v{{ $dashboardVersion }}</div>
         </md-list-item>
         <md-list-item class="md-layout md-gutter md-alignment-center-center">
           <b class="md-list-item stat-name"> Fragmentation </b>

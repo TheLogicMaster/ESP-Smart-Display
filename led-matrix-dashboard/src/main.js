@@ -131,6 +131,19 @@ Vue.mixin({
       }
       return true;
     },
+    async checkForUpdate() {
+      try {
+        let result = await axios.get('https://api.github.com/repos/TheLogicMaster/ESP-LED-Matrix-Display/tags')
+        let version = 0
+        for (let i in result.data)
+          version = Math.max(0, Number(result.data[i].name.slice(1)))
+        store.commit('set', ['latestVersion', version])
+        return version > Vue.prototype.$dashboardVersion
+      } catch (error) {
+        console.error(error)
+        return false
+      }
+    },
     sleep(ms) {
       return new Promise(resolve => setTimeout(resolve, ms))
     },
@@ -530,7 +543,6 @@ Vue.mixin({
       for (let key of Object.keys(defaults))
         widget[key] = widget[key] || defaults[key]
       return widget
-      //return {...this.createDefaultWidget(widget.type), ...widget}
     },
     bloatConfig(config) {
       config.backgroundColor = config.backgroundColor || '0x000000'
@@ -538,6 +550,8 @@ Vue.mixin({
       config.timezone = config.timezone || 'eastern'
       config.weatherLocation = config.weatherLocation || ''
       config.weatherKey = config.weatherKey || ''
+      config.scanPattern = config.scanPattern || 0
+      config.muxPattern = config.muxPattern || 0
       config.brightnessMode = config.brightnessMode || 0
       config.brightnessLower = config.brightnessLower || 15
       config.brightnessUpper = config.brightnessUpper || 100
@@ -627,7 +641,8 @@ export const store = new Vuex.Store({
     images: {},
     loadingImage: '',
     stats: {},
-    backdrop: false
+    backdrop: false,
+    latestVersion: 0
   },
   mutations: {
     set(state, [variable, value]) {
