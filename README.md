@@ -73,8 +73,10 @@ code to the board, then select *FS Data Upload* under *Tools*.
 
 ### Platformio
 To use [Platformio](https://docs.platformio.org/), install it and configure platformio.ini to suit the display size and
-ESP8266 flash layout. Build and upload to the board. There seems to be an issue using .ino files with platformio which
-necessitates running the upload task twice. Then run the *Upload Filesystem Image* task.
+ESP8266 flash layout. If you are using one of the boards with an existing environment, just use that one, especially
+since that will enable easy OTA updates using release binaries rather than manually compiling and flashing new ones. 
+Build and upload to the board. There seems to be an issue using .ino files with platformio which necessitates running 
+the upload task twice. Then run the *Upload Filesystem Image* task.
 
 ### Initial Setup
 This project uses [WifiManager](https://github.com/tzapu/WiFiManager) to handle WiFi configuration. After successfully
@@ -162,7 +164,7 @@ based or basic auth could be a future feature.
 It's recommended to use Platformio if you are planning on customizing the firmware.
 ### Definitions
 The definitions are all documented in the source code. The following definitions are configured in the platformio.ini 
-file if using Platformio. Just change the source definitions in Arduino IDE.
+file if using Platformio. Just change the source definitions if using Arduino IDE.
 * **VERSION_CODE:** This is used to update dashboard browser caches and ensure that the dashboard version always
 matches the firmware version so that hopefully no broken configurations occur. 
 * **DISPLAY_WIDTH:** The width of the display. Used for buffer sizes and configuration thresholds.

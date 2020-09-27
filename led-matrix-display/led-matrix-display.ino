@@ -368,6 +368,7 @@ time_t sunRiseTime;
 time_t sunSetTime;
 uint8_t scanPattern;
 uint8_t muxPattern;
+uint8_t muxDelay;
 
 #if BRIGHTNESS_ROLLING_AVG_SIZE > 0
 #include <RunningAverage.h>
@@ -455,6 +456,7 @@ bool parseConfig(char data[], String& errorString) {
     double tempLattitude = doc["lattitude"];
     uint8_t tempScanPattern = doc["scanPattern"];
     uint8_t tempMuxPattern = doc["muxPattern"];
+    uint8_t tempMuxDelay = doc["muxDelay"];
 
     bool tempUsingWeather = false;
     std::vector <Widget> tempWidgets;
@@ -555,10 +557,12 @@ bool parseConfig(char data[], String& errorString) {
     longitude = tempLongitude;
     muxPattern = tempMuxPattern;
     scanPattern = tempScanPattern;
+    muxDelay = tempMuxDelay;
 
     display.setFastUpdate(fastUpdate);
     display.setMuxPattern(static_cast<mux_patterns>(muxPattern));
     display.setScanPattern(static_cast<scan_patterns>(scanPattern));
+    display.setMuxDelay(muxDelay, muxDelay, muxDelay, muxDelay, muxDelay);
 
     weatherUpdateTime = 0;
     sunMoonTime = 0;

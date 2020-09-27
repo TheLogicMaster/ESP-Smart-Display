@@ -73,7 +73,14 @@ export default {
           this.error('Error', 'Failed to update display: ' + error)
         })
       } else {
-        let result = this.$axios.get('')
+        try {
+          // https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/download/v0/firmware-nodemcu-32x64-v0.bin
+          // https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/download/v0/firmware-nodemcuv2-32x64-v0.bin
+          let result = await this.$axios.get(`https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/download/v${this.$store.state.latestVersion}/firmware-${this.$store.state.stats.platform}-${this.$store.state.stats.height}x${this.$store.state.stats.width}-v${this.$store.state.latestVersion}.bin`)
+          console.log(result.data)
+        } catch (error) {
+          console.error(error)
+        }
       }
     },
     retry() {

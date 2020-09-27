@@ -46,6 +46,10 @@
           </md-select>
         </md-field>
         <md-field>
+          <label>Mux Delay</label>
+          <md-input :min="0" type="number" v-model.number="config.muxDelay"></md-input>
+        </md-field>
+        <md-field>
           <label>Brightness Mode</label>
           <md-select v-model.number="config.brightnessMode">
             <md-option :value="0">Static</md-option>

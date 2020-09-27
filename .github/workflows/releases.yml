@@ -31,11 +31,11 @@ jobs:
     
       - name: Build PlatformIO Binaries
         run: |
-          platformio run -e nodemcu-32x64 -e d1-mini-32x64
-          platformio run -e nodemcu-32x64 -t buildfs
-          mv ./.pio/build/nodemcu-32x64/firmware.bin ./firmware-nodemcu-32x64-${{ steps.get_version.outputs.VERSION }}.bin
+          platformio run -e nodemcuv2-32x64 -e d1-mini-32x64
+          platformio run -e nodemcuv2-32x64 -t buildfs
+          mv ./.pio/build/nodemcuv2-32x64/firmware.bin ./firmware-nodemcuv2-32x64-${{ steps.get_version.outputs.VERSION }}.bin
           mv ./.pio/build/d1-mini-32x64/firmware.bin ./firmware-d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin
-          mv ./.pio/build/nodemcu-32x64/littlefs.bin ./fs-4m-${{ steps.get_version.outputs.VERSION }}.bin
+          mv ./.pio/build/nodemcuv2-32x64/littlefs.bin ./fs-4m-${{ steps.get_version.outputs.VERSION }}.bin
           
       - name: Create Release
         id: create_release
@@ -52,6 +52,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          hub release edit -a ./firmware-nodemcu-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
+          hub release edit -a ./firmware-nodemcuv2-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
           hub release edit -a ./firmware-d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
           hub release edit -a ./fs-4m-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}

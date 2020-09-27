@@ -552,6 +552,7 @@ Vue.mixin({
       config.weatherKey = config.weatherKey || ''
       config.scanPattern = config.scanPattern || 0
       config.muxPattern = config.muxPattern || 0
+      config.muxDelay = config.muxDelay || 0
       config.brightnessMode = config.brightnessMode || 0
       config.brightnessLower = config.brightnessLower || 15
       config.brightnessUpper = config.brightnessUpper || 100
