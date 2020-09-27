@@ -147,9 +147,10 @@ Vue.mixin({
     sleep(ms) {
       return new Promise(resolve => setTimeout(resolve, ms))
     },
-    info(title, content) {
+    info(title, content, persist=false) {
       this.$snotify.info(content, title, {
-        closeOnClick: true
+        closeOnClick: true,
+        timeout: persist ? 0 : 3000
       })
     },
     error(title, content) {

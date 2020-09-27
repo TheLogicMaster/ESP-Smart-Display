@@ -723,7 +723,14 @@ void serveRestart() {
 void startOTA() {
     state = STATE_UPDATING;
     LittleFS.end();
-    server->send(200, "text/plain", F(""));
+    server->send(200);
+}
+
+void abortOTA() {
+    state = STATE_NORMAL;
+    LittleFS.begin();
+    server->send(200);
+    needsUpdate = true;
 }
 
 void serveStats() {
@@ -980,6 +987,7 @@ void setupWebserver() {
     }
 
     server->on(F("/config"), serveConfig);
+    server->on(F("/abortUpdate"), abortOTA);
     server->on(F("/beginUpdate"), startOTA);
     server->on(F("/fullRefresh"), serveFullUpdate);
     server->on(F("/restart"), serveRestart);
