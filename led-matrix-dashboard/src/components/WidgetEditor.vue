@@ -101,7 +101,16 @@
             <md-option :value="2"> Wrap Words </md-option>
           </md-select>
         </md-field>
-        <md-checkbox v-model="widget.large">Large</md-checkbox>
+        <md-field class="field">
+          <label class="label">Font</label>
+          <md-select name="Font" v-model="widget.font" @input="changeFont">
+            <md-option :value="0"> Tiny </md-option>
+            <md-option :value="1"> Tetris </md-option>
+            <md-option :value="2"> Normal </md-option>
+            <md-option :value="3"> Large </md-option>
+            <md-option :value="4"> Huge </md-option>
+          </md-select>
+        </md-field>
       </template>
       <div v-if="widget.type !== 0 && widget.type !== 1 && widget.type !== 3">
         <div class="field">
@@ -189,6 +198,12 @@ export default {
         return 2
       else
         return 0
+    },
+    changeFont(font) {
+      if (font === 1)
+        this.widget.frequency = 100
+      else if (this.widget.type === 4)
+        this.widget.frequency = 0
     },
     changeArgs(args) {
       this.widget.args.length = args

@@ -61,7 +61,7 @@ export default {
         case 7:
           return 'weatherIcon.png'
         case 2:
-          return `${this.widget.large ? 'bigClock' : 'clock'}${this.widget.contentType}.png`
+          return `${this.widget.font >= 2 ? 'bigClock' : 'clock'}${this.widget.contentType}.png`
       }
     }
   },
@@ -69,8 +69,7 @@ export default {
     widget: {
       deep: true,
       handler: function (widget) {
-        // Todo: simplify check?
-        if (!this.resizing && (widget.width !== this.currentWidget.width || widget.height !== this.currentWidget.height || widget.content !== this.currentWidget.content || widget.contentType !== this.currentWidget.contentType || widget.bordered !== this.currentWidget.bordered || widget.large !== this.currentWidget.large)) {
+        if (!this.resizing && !this.areObjectsEqual(widget, this.currentWidget, ['xOff', 'yOff']) ) {
           this.interactable.unset()
           this.setup(widget)
         }

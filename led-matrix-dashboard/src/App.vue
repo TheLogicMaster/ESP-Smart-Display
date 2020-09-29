@@ -66,7 +66,7 @@
 
       <md-app-content>
         <vue-progress-bar></vue-progress-bar>
-        <router-view class="router"></router-view>
+        <router-view v-if="$store.state.stats && $store.state.configuration" class="router"></router-view>
       </md-app-content>
     </md-app>
 
@@ -79,6 +79,8 @@ export default {
   async mounted() {
     this.$Progress.finish()
     this.isMobile = this.$isMobile()
+    await this.waitForPromiseSuccess(this.getStats)
+    await this.waitForPromiseSuccess(this.getConfig)
     if (await this.checkForUpdate())
       this.$snotify.info('A new version of the firmware is available', 'Update Available', {
         closeOnClick: true,

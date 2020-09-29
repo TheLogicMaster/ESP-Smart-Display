@@ -1,7 +1,7 @@
 # ESP LED Matrix Display
 
 ## About
-This project is intended to provide an easily customizeable and functional firmware to drive LED Matrix panels using 
+This project is intended to provide an graphically customizeable and functional firmware to drive LED Matrix panels using 
 ESP8266 based microcontrollers. It's powered by the [PxMatrix](https://github.com/2dom/PxMatrix) driver and is
 inspired by the concept of [MorphingClockRemix](https://github.com/lmirel/MorphingClockRemix) and intends to greatly
 expand upon it, providing an easily customizable system using a JSON based configuration system and a Vue based web
@@ -102,8 +102,8 @@ functions. The sidebar handles navigation between pages, and the page names shou
 ## OTA Updates
 OTA Updates are as simple as downloading the newest release binary that matches your board configuration and selecting
 it from the *OTA Update* page of the dashboard. Alternatively if you have a non-stock configuration, pull the repo
-changes and build and deploy the dashboard and firmware again. In the future, automatic update checking and updating 
-from the dashboard will be implemented.
+changes and build and deploy the dashboard and firmware again. The dashboard can also automatically download and flash
+the latest binaries if you are using a stock configuration. 
 
 ## Configuration
 The display configuration is entirely based on a JSON configuration file stored in the display filesystem. This is
@@ -115,9 +115,11 @@ the properties of custom images.
 ## Widgets
 
 ### Text Based Widgets
-All text based widgets have two font sizes: normal and large. The normal font uses the TinyFont library from
-MorphingClockRemix and the large font uses the default Adafruit GFX printing font. They can be freely resized and the 
-text content will be centered. Supports word and character wrapping.
+All text based widgets have three font types. The tiny font uses the TinyFont library from
+MorphingClockRemix. The [TetrisAnimation](https://github.com/toblum/TetrisAnimation) font looks cool and creates the
+text using Tetris blocks. The rest of the font sizes use the default Adafruit GFX printing font scaled different amounts. 
+They can be freely resized and the text content will be centered. Supports word and character wrapping for 
+non-tetris fonts.
 * **Text:** This is a basic Text widget that shows a static string.
 * **Digital Clock:** This widget shows the current time in 24 hour, 12 hour, or 12 hour with period formats.
 * **JSON GET Text:** This sends a GET request and parses a JSON response to display. Supports HTTP and HTTPS.
@@ -133,7 +135,8 @@ These components show a simple animation based on the current weather state from
 location need to be configured on the *Settings* page.
 
 ### Analog Clock Widgets
-This is a scalable widget that draws a clock based on the current time.
+This is a scalable widget that draws a clock based on the current time. All time based widgets update ten times per
+second, so the maximum re-draw latency is 100ms. 
 
 ## Logistics
 This project is intended to handle everything in a more asynchronous way to ensure consistent rendering. Previously, I
@@ -182,13 +185,18 @@ you may want to disable this. This is disabled by default.
 * **Double Buffering:** The PxMatrix library supports using two buffers, with one being the actively rendered buffer
 and the other being the one being drawn to. This prevents partial renderings of content until the entire screen is done
 drawing. The downside is that twice as much memory is used for display buffers. This is enabled by default.
+* **TetrisAnimation Font:** There are a few significant reasons to disable this. The library was not written in a way that 
+supports double buffering, causing a shadow effect if using double buffering.  In addition, just having the library
+enabled uses a ton of memory for an ESP8266: around 10KB, which ideally would have been stored partially in PROGMEM, but re-writing the 
+entire library isn't really an option. The library also leaks the drawn characters into the Serial stream, which isn't 
+ideal, either. It's a very cool looking animation, though.
+
 ### Firmware Embedded Images
 Addition images can easily be added to the firmware by including the source header for either images stored as a 
 uint8_t, uint16_t, or char(Gimp) array. To make the display aware of the images, simply add a new entry to the *progmemImages*
 map with the correct type, dimensions, and a name. 565 color and Gimp header files are supported. Both of which can be
 exported from the dashboard. The 565 format uses half the space that the Gimp format uses, so it is preferable. Unwanted
 included images can also be removed in this way.
-
 
 ## Credits
 * Small font and weather animations are repurposed from 

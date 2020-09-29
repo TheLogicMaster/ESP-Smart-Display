@@ -11,6 +11,10 @@
 #define WIDGET_TEXT_GET_JSON 5
 #define WIDGET_TEXT_GET 6
 #define WIDGET_WEATHER_ICON 7
+#define WIDGET_SHAPE 8
+#define FONT_TINY 0
+#define FONT_TETRIS 1
+#define FONT_GFX 2
 #define IMAGE_UINT8 0
 #define IMAGE_UINT16 1
 #define IMAGE_GIMP 2
@@ -68,11 +72,17 @@
 #ifndef USE_HTTPS
 #define USE_HTTPS true // Disable if only http GET requests are needed space
 #endif
+#ifndef DELETE_TRANSPARENCY_BUFFER_ON_HTTPS
+#define DELETE_TRANSPARENCY_BUFFER_ON_HTTPS false // Delete transparency buffer when making HTTPS requests if they are failing due to not enough memory
+#endif
 #ifndef USE_PROGMEM_IMAGES
 #define USE_PROGMEM_IMAGES true // Disable if firmware images aren't needed to save space
 #endif
 #ifndef USE_WEATHER
 #define USE_WEATHER true // Disable to save space if weather widgets aren't needed
+#endif
+#ifndef USE_TETRIS
+#define USE_TETRIS false
 #endif
 #ifndef VERSION_CODE
 #define VERSION_CODE 0
@@ -124,6 +134,9 @@
 #if USE_SUNRISE
 #include <SunMoonCalc.h>
 #endif
+#if USE_TETRIS
+#include <TetrisMatrixDraw.h>
+#endif
 #include "TinyFont.h"
 #include "Structures.h"
 
@@ -132,6 +145,7 @@
 #include "BLM.h"
 #include "Taz.h"
 #include "Mario.h"
+#include "Youtube.h"
 #endif
 
 TimeChangeRule EDT = {"EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
@@ -162,8 +176,7 @@ std::map<std::string, Timezone *> timezones = {{"eastern",  &Eastern},
 
 #include <PxMatrix.h>
 
-#ifdef ESP32
-
+#if defined(ESP32)
 #define P_LAT 22
 #define P_A 19
 #define P_B 23
@@ -173,11 +186,7 @@ std::map<std::string, Timezone *> timezones = {{"eastern",  &Eastern},
 #define P_OE 2
 hw_timer_t * timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
-
-#endif
-
-#ifdef ESP8266
-
+#elif defined(ESP8266)
 #include <Ticker.h>
 Ticker display_ticker;
 #define P_LAT D0
@@ -187,23 +196,17 @@ Ticker display_ticker;
 #define P_D D6
 #define P_E D3
 #define P_OE D4
-
 #endif
 
-//PxMATRIX display(64, 32, P_LAT, P_OE, P_A, P_B, P_C, P_D, P_E);
-//PxMATRIX display(32,16,P_LAT, P_OE,P_A,P_B,P_C);
-PxMATRIX display(64, 32, P_LAT, P_OE, P_A, P_B, P_C, P_D, P_E);
-//PxMATRIX display(64,64,P_LAT, P_OE,P_A,P_B,P_C,P_D,P_E);
+PxMATRIX display(DISPLAY_WIDTH, DISPLAY_HEIGHT, P_LAT, P_OE, P_A, P_B, P_C, P_D, P_E);
 
-#ifdef ESP8266
+#if defined(ESP8266)
 // ISR for display refresh
 void display_updater() {
   //display.displayTestPattern(70);
   display.display(70);
 }
-#endif
-
-#ifdef ESP32
+#elif defined(ESP32)
 void IRAM_ATTR display_updater() {
   // Increment the counter and set the time of ISR
   portENTER_CRITICAL_ISR(&timerMux);
@@ -265,7 +268,7 @@ public:
     }
 
     void drawPixel(int16_t x, int16_t y, uint16_t color) {
-        if (buffer.get() == nullptr) {
+        if (!buffer) {
             DEBUG("DisplayBuffer: Buffer is not allocated");
             return;
         }
@@ -279,7 +282,7 @@ public:
     }
 
     void write(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, uint8_t height) {
-        if (buffer.get() == nullptr) {
+        if (!buffer) {
             DEBUG("DisplayBuffer: Buffer is  not allocated");
             return;
         }
@@ -298,13 +301,13 @@ public:
     }
 
     bool isAllocated() {
-        return buffer.get() != nullptr;
+        return (bool)buffer;
     }
 
     bool allocate() {
         DEBUG("Allocating display buffer...");
         buffer.reset(new uint16_t[_width * _height]);
-        if (buffer.get() == nullptr) {
+        if (!buffer) {
             Serial.println(F("Failed to allocate display buffer"));
             return false;
         }
@@ -321,7 +324,8 @@ std::map <std::string, ProgmemImage> progmemImages = {
 #if USE_PROGMEM_IMAGES
                                                      {"taz",  {23, 28, 1,  IMAGE_UINT16, taz}},
                                                      {"blm",  {64, 32, 36, IMAGE_UINT8,  blmAnimations}},
-                                                     {"mario",  {64, 32, 1, IMAGE_UINT16,  mario}}
+                                                     {"mario",  {64, 32, 1, IMAGE_UINT16,  mario}},
+                                                     {"youtube", {21, 16, 1, IMAGE_UINT16, youtube}}
 #endif
                                                      };
 
@@ -518,7 +522,7 @@ bool parseConfig(char data[], String& errorString) {
                                    widget["auth"].isNull() ? "" : std::string(widget["auth"].as<char *>()), args,
                                    widget["xOff"], widget["yOff"], widget["width"], widget["height"],
                                    widget["frequency"], widget["offset"], widget["length"], colors,
-                                   widget["large"],
+                                   widget["font"],
                                    widget["bordered"], widget["borderColor"].isNull() ? 0 : parseHexColorString(
                             widget["borderColor"].as<char *>()),
                                    widget["transparent"],
@@ -566,14 +570,6 @@ bool parseConfig(char data[], String& errorString) {
 
     weatherUpdateTime = 0;
     sunMoonTime = 0;
-
-    // Transparency uses about an extra 4KB
-    if (displayBuffer.isAllocated()) {
-        if (usingTransparency)
-            displayBuffer.fillScreen(0);
-        else
-            displayBuffer.close();
-    }
 
     Serial.println(F("Successfully loaded configuration!"));
     Serial.printf("Memory Free: %i, Fragmentation: %i%%\n", ESP.getFreeHeap(), ESP.getHeapFragmentation());
@@ -676,6 +672,18 @@ void serveRoot() {
 
 void serveConfig() {
     if (server->method() == HTTP_POST) {
+        // Free as much memory as possible
+        if (displayBuffer.isAllocated())
+            displayBuffer.close();
+        for (uint i = 0; i < widgets.size(); i++) {
+            widgets[i].file.close();
+#if USE_TETRIS
+            widgets[i].tetris.reset();
+#endif
+        }
+
+        needsUpdate = true;
+
         std::unique_ptr<char[]> buf(new char[MAX_CONFIG_FILE_SIZE]);
 
         String jsonString = server->arg(F("plain"));
@@ -684,6 +692,7 @@ void serveConfig() {
             return;
         }
         jsonString.toCharArray(buf.get(), MAX_CONFIG_FILE_SIZE);
+
         String error;
         if (parseConfig(buf.get(), error)) {
             LittleFS.remove("/config.json");
@@ -1100,26 +1109,52 @@ void drawAnalogClock(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t 
                yOffset + round(sin(hourAngle) * radius * .5), colorHour);
 }
 
-const char *getTimeText(uint8_t type) {
-    std::string text;
+String getTimeText(uint8_t type) {
+    String text;
     uint8_t hourValue = type == CLOCK_TYPE_24 ? theHour : theHour12;
     if (hourValue < 10)
         text += "0";
-    text.append(dtostrf(hourValue, hourValue < 10 ? 1 : 2, 0, " "));
-    text.append(":");
+    text += hourValue;
+    text += ":";
     if (theMinute < 10)
-        text.append("0");
-    text += dtostrf(theMinute, theMinute < 10 ? 1 : 2, 0, " ");
+        text += "0";
+    text += theMinute;
     if (type == CLOCK_TYPE_12_PERIOD)
         text += theHour < 12 ? "AM" : "PM";
-    return text.c_str();
+    return text;
 }
 
-void drawBigText(Adafruit_GFX &d, const char *text, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height,
-                 uint16_t color, uint8_t wrapping) {
+void drawText(Adafruit_GFX &d, const char *text, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height,
+                 uint16_t color, uint8_t wrapping, uint8_t size) {
+    d.setTextSize(size);
     d.setTextColor(color);
     d.setCursor(xOffset, yOffset);
     d.print(text);
+}
+
+void drawTextWidget(Adafruit_GFX &d, Widget &widget) {
+    if (widget.font >= FONT_GFX)
+                drawText(d, widget.content.c_str(),
+                        widget.xOff + _max(0, (widget.width - 6 * (int) widget.content.length() + 1) / 2),
+                        widget.yOff + (widget.height - 7) / 2, widget.width, widget.height, widget.colors[0],
+                        widget.contentType, widget.font - FONT_GFX + 1);
+            else if (widget.font == FONT_TINY)
+                drawTinyText(d, widget.content.c_str(),
+                         widget.xOff + _max(0, (widget.width - (TF_COLS + 1) * (int) widget.content.length() + 1) / 2),
+                         widget.yOff + (widget.height - TF_ROWS) / 2, widget.width, widget.height, widget.colors[0],
+                         true, 0, widget.contentType);
+#if USE_TETRIS
+            else if (widget.tetris) {
+                widget.tetris->setText(widget.content.c_str());
+                uint x = widget.xOff + _max(0, (widget.width - (2 + TETRIS_DISTANCE_BETWEEN_DIGITS * widget.content.length())) / 2);
+                uint y = widget.yOff + _max(0, (widget.height - 20) / 2);
+                widget.finished = widget.tetris->drawText(x, y + 20);
+                if (widget.type == WIDGET_CLOCK && widget.stateExtra) {
+                    d.drawRect(x + 16, y + 13, 2, 2, widget.colors[0]);
+                    d.drawRect(x + 16, y + 17, 2, 2, widget.colors[0]);
+                }
+            }
+#endif
 }
 
 void drawTinyText(Adafruit_GFX &display, const char text[], uint8_t x, uint8_t y, uint8_t width, uint8_t height,
@@ -1144,6 +1179,9 @@ bool sendGetRequest(std::string url, std::string auth, uint16_t timeout, bool js
 
     std::unique_ptr<WiFiClient> clientPtr;
     
+    if (DELETE_TRANSPARENCY_BUFFER_ON_HTTPS && ssl)
+        displayBuffer.close();
+
 #if USE_HTTPS
     clientPtr.reset(ssl ? new WiFiClientSecure() : new WiFiClient());
 #else
@@ -1233,6 +1271,17 @@ const char *jsonVariantToString(JsonVariant &variant) {
     }
 }
 
+void ensureTetrisAllocated(Widget &widget) {
+#if USE_TETRIS
+    if (!widget.tetris) {
+        widget.tetris.reset(new TetrisMatrixDraw(display));
+        DEBUG("Allocating Tetris object");
+    }
+    if (!widget.tetris)
+        DEBUG("Failed to create Tetris object");
+#endif
+}
+
 void updateTextGETWidgetJson(Widget &widget) {
     std::string data;
     if (!sendGetRequest(widget.source, widget.auth, widget.length, true, data))
@@ -1265,8 +1314,10 @@ void updateTextGETWidgetJson(Widget &widget) {
             }
         }
         String s = String(jsonVariantToString(current));
-        if (!widget.large)
+        if (widget.font >= FONT_GFX)
             s.toUpperCase();
+        if (widget.font == FONT_TETRIS)
+            ensureTetrisAllocated(widget);
         widget.content = std::string(s.c_str());
         widget.dirty = true;
     }
@@ -1277,8 +1328,10 @@ void updateTextGETWidget(Widget &widget) {
     if (!sendGetRequest(widget.source, widget.auth, widget.length, false, data))
         return;
     String s = String(data.c_str());
-    if (!widget.large)
+    if (widget.font >= FONT_GFX)
         s.toUpperCase();
+    if (widget.font == FONT_TETRIS)
+            ensureTetrisAllocated(widget);
     widget.content = std::string(s.c_str());
     widget.dirty = true;
 }
@@ -1299,9 +1352,32 @@ void updateClockWidget(Widget &widget) {
     if (widget.state != theMinute) {
         widget.state = theMinute;
         widget.dirty = true;
+        widget.finished = false;
         if (widget.type != WIDGET_ANALOG_CLOCK) 
-            widget.content = getTimeText(widget.contentType);
+            widget.content = getTimeText(widget.contentType).c_str();
     }
+
+    time_t t = millis();
+    if (widget.stateExtra != (bool)(t & 1024)) {
+        widget.stateExtra = (bool)(t & 1024);
+        widget.dirty = true;
+        String temp = String(widget.content.c_str());
+        if (widget.stateExtra || widget.font == FONT_TETRIS)
+            temp.replace(':', ' ');
+        else
+            temp.replace(' ', ':');
+        widget.content = temp.c_str();
+    }
+
+#if USE_TETRIS
+    if (widget.font == FONT_TETRIS) {
+        ensureTetrisAllocated(widget.tetris);
+        if (widget.tetris) {
+            if (!widget.finished)
+                widget.dirty = true;
+        }
+    }
+#endif   
 }
 
 void updateWidget(Widget &widget) {
@@ -1324,6 +1400,11 @@ void updateWidget(Widget &widget) {
             updateClockWidget(widget);
             break;
         case WIDGET_TEXT:
+        if (widget.font == FONT_TETRIS) {
+            ensureTetrisAllocated(widget);
+            if (!widget.finished)
+                widget.dirty = true;
+        }
             break;
         default:
             Serial.print(F("Invalid widget type to update: "));
@@ -1338,7 +1419,7 @@ void updateWidget(Widget &widget) {
 
 void updateWidgets() {
     for (uint i = 0; i < widgets.size(); i++)
-        if (widgets[i].updateFrequency > 0 && (millis() - widgets[i].lastUpdate > widgets[i].updateFrequency || widgets[i].lastUpdate == 0))
+        if (widgets[i].lastUpdate == 0 || widgets[i].updateFrequency > 0 && (millis() - widgets[i].lastUpdate > widgets[i].updateFrequency))
             updateWidget(widgets[i]);
 }
 
@@ -1394,26 +1475,8 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
         case WIDGET_TEXT_GET:
         case WIDGET_TEXT:
         case WIDGET_CLOCK:
-            if (widget.large)
-                drawBigText(d, widget.content.c_str(),
-                        widget.xOff + _max(0, (widget.width - 6 * (int) widget.content.length() + 1) / 2),
-                        widget.yOff + (widget.height - 7) / 2, widget.width, widget.height, widget.colors[0],
-                        widget.contentType);
-            else
-                drawTinyText(d, widget.content.c_str(),
-                         widget.xOff + _max(0, (widget.width - (TF_COLS + 1) * (int) widget.content.length() + 1) / 2),
-                         widget.yOff + (widget.height - TF_ROWS) / 2, widget.width, widget.height, widget.colors[0],
-                         true, 0, widget.contentType);
+            drawTextWidget(d, widget);
             break;
-        /*case WIDGET_TEXT_GET_JSON_BIG:
-        case WIDGET_TEXT_GET_BIG:
-        case WIDGET_TEXT_BIG:
-        case WIDGET_CLOCK_BIG:
-            drawBigText(d, widget.content.c_str(),
-                        widget.xOff + _max(0, (widget.width - 6 * (int) widget.content.length() + 1) / 2),
-                        widget.yOff + (widget.height - 7) / 2, widget.width, widget.height, widget.colors[0],
-                        widget.contentType);
-            break;*/
         case WIDGET_WEATHER_ICON:
 #if USE_WEATHER
             TIDrawIcon(d, weatherID, widget.xOff + _max(0, (widget.width - 10 + 1) / 2), widget.yOff + (widget.height - 5) / 2, widget.state, true, widget.transparent, widget.backgroundColor);

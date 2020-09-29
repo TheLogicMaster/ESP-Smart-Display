@@ -116,13 +116,15 @@ Vue.mixin({
     isObjectEmpty(o) {
       return Object.keys(o).length === 0
     },
-    areObjectsEqual(object1, object2) {
+    areObjectsEqual(object1, object2, excludeKeys = []) {
       const keys1 = Object.keys(object1);
       const keys2 = Object.keys(object2);
       if (keys1.length !== keys2.length)
         return false;
 
       for (let key of keys1) {
+        if (excludeKeys.includes(key))
+          continue
         const val1 = object1[key];
         const val2 = object2[key];
         const areObjects = isObject(val1) && isObject(val2);
@@ -377,6 +379,12 @@ Vue.mixin({
       }
       return success
     },
+    getTextSize(length, font, wrapping) {
+      return {
+        width: (font === 0 ? 4 : (font === 1 ? 7 : 6 * Math.pow(2, font - 2))) * length + (font === 1 ? 2 : 0),
+        height: font === 0 ? 5 : (font === 1 ? 20 : 7 * Math.pow(2, font - 2))
+      }
+    },
     getWidgetMinimumSize(widget) {
       let size = {}
       switch (widget.type) {
@@ -388,16 +396,10 @@ Vue.mixin({
           size = {width: 10, height: 10}
           break
         case 4: // Text
-          if (widget.contentType !== 0)
-            size = {width: widget.large ? 6 : 4, height: widget.large ? 7 : 5}
-          else
-            size = {width: widget.content.length * (widget.large ? 6 : 4), height: widget.large ? 7 : 5}
+          size = this.getTextSize(widget.content.length, widget.font, widget.contentType)
           break
         case 2: // Digital Clock
-          size = {
-            width: widget.contentType === 2 ? (widget.large ? 42 : 29) : (widget.large ? 30 : 21),
-            height: widget.large ? 7 : 5
-          }
+          size = this.getTextSize(widget.contentType === 2 ? 7 : 5, widget.font, widget.contentType)
           break
         case 5: // GET JSON
         case 6: // GET Plaintext
@@ -424,7 +426,7 @@ Vue.mixin({
         source: '',
         length: 0,
         offset: 0,
-        large: false,
+        font: 0,
         frequency: 0,
         background: false,
         disabled: false,
@@ -638,11 +640,11 @@ Vue.filter('capitalize', function (value) {
 
 export const store = new Vuex.Store({
   state: {
-    configuration: {},
+    configuration: null,
     imageData: {},
     images: {},
     loadingImage: '',
-    stats: {},
+    stats: null,
     backdrop: false,
     latestVersion: 0
   },

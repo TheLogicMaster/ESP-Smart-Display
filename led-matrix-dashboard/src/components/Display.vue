@@ -85,7 +85,8 @@ export default {
     presets: {
       'Black Lives Matter': [],
       'Mario Clock': [],
-      'Youtube Subscriber Count': ['Channel ID', 'Google API Key']
+      'Youtube Subscriber Count': ['Channel ID', 'Google API Key'],
+      'Tetris Clock': []
     }
   }),
   methods: {
@@ -125,7 +126,7 @@ export default {
             {
               id: 1,
               type: 2,
-              large: true,
+              font: 2,
               xOff: 31,
               yOff: 23,
               width: 32,
@@ -137,24 +138,66 @@ export default {
           ]
           break
         case 'Youtube Subscriber Count':
+          this.config.backgroundColor = '0x000000'
           widgets = [
             {
-              "id": 2, // UCFKDEp9si4RmHFWJW1vYsMA
-              "type": 5,
-              "source": `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${this.parameters[0]}&key=${this.parameters[1]}`,
-              "length": 15000,
-              "frequency": 60000,
-              "borderColor": '0xFF0000',
-              "backgroundColor": '0x00FFFF',
-              "args": ['items', '0', 'statistics', 'subscriberCount'],
-              "colors": ['0x00FF00'],
-              "width": 29,
-              "height": 5
+              width: 21,
+              height: 16,
+              xOff: 22,
+              yOff: 2,
+              content: 'youtube',
+              background: true,
+              length: 1
+            },
+            {
+              id: 1, // UCFKDEp9si4RmHFWJW1vYsMA
+              type: 5,
+              source: `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${this.parameters[0]}&key=${this.parameters[1]}`,
+              length: 15000,
+              frequency: 60000,
+              borderColor: '0xFF0000',
+              backgroundColor: '0x00FFFF',
+              args: ['items', '0', 'statistics', 'subscriberCount'],
+              colors: ['0x00FF00'],
+              width: 29,
+              height: 5,
+              xOff: 18,
+              yOff: 21
+            }
+          ]
+          break
+        case 'Tetris Clock':
+          this.config.backgroundColor = '0x000000'
+          widgets = [
+            {
+              type: 2,
+              font: 1,
+              width: 53,
+              height: 22,
+              frequency: 100,
+              colors: ['0x00FF11'],
+              contentType: 2,
+              xOff: 6,
+              yOff: 10,
+              bordered: true,
+              borderColor: '0xFF0000'
+            },
+            {
+              id: 1,
+              xOff: 14,
+              yOff: 2,
+              type: 4,
+              content: 'TETRIS',
+              font: 2,
+              colors: ['0x00FF00'],
+              width: 36,
+              height: 7
             }
           ]
           break
       }
 
+      this.config.widgets.length = 0
       for (let i in widgets)
         this.config.widgets.push(this.bloatWidget(widgets[i]))
       this.presetDialog = false
