@@ -238,18 +238,28 @@ Vue.mixin({
       return "0x" + hex.slice(1, hex.length).toUpperCase()
     },
     cppHexToJs(hex) {
-      if (hex === null || hex === '')
+      if (!hex || hex === '')
         return '#000000'
       return "#" + hex.slice(2, hex.length).toLowerCase()
     },
     rgbToHex(r, g, b) {
       return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
     },
-    hexToRgb(hex) {
-      if (hex === undefined) {
-        hex = '#000000'
-        //console.warn('Tried to convert undefined HEX value')
+    rgbObjectToHex(rgb) {
+      return this.rgbToHex(rgb.r, rgb.g, rgb.b)
+    },
+    parseBinaryFilename(name) {
+      let parts = name.split('.')[0].split('-')
+      return {
+        name: parts[0],
+        width: Number(parts[1]),
+        height: Number(parts[2]),
+        frames: Number(parts[3])
       }
+    },
+    hexToRgb(hex) {
+      if (hex === undefined)
+        hex = '#000000'
       let result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
       return result ? {
         r: parseInt(result[1], 16),
@@ -267,16 +277,6 @@ Vue.mixin({
     pack565Color(color) {
       return ((color.r & 0xF8) << 8) | ((color.g & 0xFC) << 3) | (color.b >> 3)
       //return 0x000000 | (color.r << 24) | (color.g << 16) | (color.b << 8);
-    },
-    decodeGimpImage(data) {
-      let image = []
-      for (let i = 0; i + 3 < data.length; i += 4) {
-        image.push(this.rgbToHex(
-          (((data.charCodeAt(i) - 33) << 2) | ((data.charCodeAt(i + 1) - 33) >> 4)),
-          ((((data.charCodeAt(i + 1) - 33) & 0xF) << 4) | ((data.charCodeAt(i + 2) - 33) >> 2)),
-          ((((data.charCodeAt(i + 2) - 33) & 0x3) << 6) | ((data.charCodeAt(i + 3) - 33)))))
-      }
-      return image
     },
     escapeString(string) {
       return (string + '').replace(/[\\"']/g, '\\$&').replace(/\u0000/g, '\\0');
@@ -317,14 +317,20 @@ Vue.mixin({
         })
         return true
       } catch (error) {
+        this.error('Error', 'Failed to upload image to display: ' + error)
         console.log(error)
         return false
       }
     },
-    parseImageData(image, data, gimp) {
+    parseImageData(data, gimp = false) {
       let pixels = []
-      if (gimp)
-        pixels = this.decodeGimpImage(data)
+      if (gimp) {
+        for (let i = 0; i + 3 < data.length; i += 4)
+          pixels.push(this.rgbToHex(
+            (((data.charCodeAt(i) - 33) << 2) | ((data.charCodeAt(i + 1) - 33) >> 4)),
+            ((((data.charCodeAt(i + 1) - 33) & 0xF) << 4) | ((data.charCodeAt(i + 2) - 33) >> 2)),
+            ((((data.charCodeAt(i + 2) - 33) & 0x3) << 6) | ((data.charCodeAt(i + 3) - 33)))))
+      }
       else {
         let buffer = Buffer.from(data, 'binary')
         let array = new Uint16Array(buffer.buffer, buffer.byteOffset, buffer.length / Uint16Array.BYTES_PER_ELEMENT)
@@ -345,7 +351,7 @@ Vue.mixin({
           responseType: store.state.imageData[image].type === 2 ? 'text' : 'arraybuffer',
           params: {image: image + (store.state.imageData[image].progmem ? '_P' : '')}
         })
-        store.commit('setImage', [image, this.parseImageData(image, response.data, store.state.imageData[image].type === 2)])
+        store.commit('setImage', [image, this.parseImageData(response.data, store.state.imageData[image].type === 2)])
         store.commit('set', ['loadingImage', ''])
         return true
       } catch (error) {

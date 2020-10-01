@@ -42,7 +42,6 @@ struct FSImage {
     uint8_t width;
     uint8_t height;
     uint8_t length;
-    uint8_t type;
 };
 
 struct ProgmemImage {

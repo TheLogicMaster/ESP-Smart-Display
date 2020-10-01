@@ -24,6 +24,13 @@
             </md-option>
           </md-select>
         </md-field>
+        <div>
+          <md-field class="field" style="width: 80px">
+            <label>Alpha Colors</label>
+            <md-input :min="0" :max="10" type="number" v-model.number="alphaColors" @input="changeAlphaColors"></md-input>
+          </md-field>
+          <color-picker v-for="(color, key) in widget.colors" :key="key" class="get-arg inline" v-model="widget.colors[key]" :label="'Alpha ' + (key + 1)"></color-picker>
+        </div>
         <template v-if="widget.content !== '' && $store.state.imageData[widget.content]">
           <md-checkbox v-model="widget.background">Background</md-checkbox>
           <div>
@@ -144,11 +151,11 @@
       <template v-if="widget.type !== 0 && widget.type !== 1">
         <md-checkbox v-model="widget.transparent">Transparent</md-checkbox>
         <md-checkbox v-model="widget.bordered">Bordered</md-checkbox>
-      </template>
-      <div>
         <div class="field" v-for="(color, index) in widget.colors">
           <color-picker :label="requiredColors(widget.type)[index]" class="color-picker" v-model="widget.colors[index]"></color-picker>
         </div>
+      </template>
+      <div>
         <div class="field" v-if="!widget.transparent && widget.type !== 0 && widget.type !== 1">
           <color-picker label="Background" class="color-picker" v-model="widget.backgroundColor"></color-picker>
         </div>
@@ -207,6 +214,9 @@ export default {
     },
     changeArgs(args) {
       this.widget.args.length = args
+    },
+    changeAlphaColors(colors) {
+      this.widget.colors.length = colors
     },
     changeAuthContent(value) {
       if (this.widget.auth.startsWith('Basic '))
@@ -271,11 +281,13 @@ export default {
   mounted() {
     this.dynamic = this.widget.frequency !== 0
     this.args = this.widget.args.length
+    this.alphaColors = this.widget.colors.length
   },
   data: () => ({
     dynamic: false,
     auth: '',
     args: 0,
+    alphaColors: 0,
     collapsed: false,
     deleting: false
   }),

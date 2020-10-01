@@ -88,7 +88,11 @@
 #define VERSION_CODE 0
 #endif
 #ifndef BOARD_NAME
-#define BOARD_NAME "nodemcuv2" // Used to identify OTA update binaries
+#ifdef ESP32
+#define BOARD_NAME "generic-esp32" // Used to identify OTA update binaries
+#elif
+#define BOARD_NAME "generic-esp8266" // Used to identify OTA update binaries
+#endif
 #endif
 #ifndef DISPLAY_WIDTH
 #define DISPLAY_WIDTH 64 // The width of the display
@@ -305,7 +309,7 @@ public:
     }
 
     bool allocate() {
-        DEBUG("Allocating display buffer...");
+        DEBUG("Allocating display buffer...\n");
         buffer.reset(new uint16_t[_width * _height]);
         if (!buffer) {
             Serial.println(F("Failed to allocate display buffer"));
@@ -315,7 +319,7 @@ public:
     }
 
     void close() {
-        DEBUG("Freeing display buffer...");
+        DEBUG("Freeing display buffer...\n");
         buffer.reset();
     }
 };
@@ -800,8 +804,7 @@ std::map <std::string, FSImage> getFSImageData() {
     DynamicJsonDocument doc(IMAGE_JSON_BUFFER_SIZE);
     deserializeJson(doc, buf.get());
     for (auto const &entry : doc.as<JsonObject>())
-        data[entry.key().c_str()] = {entry.value()["width"], entry.value()["height"], entry.value()["length"],
-                                     entry.value()["type"]};
+        data[entry.key().c_str()] = {entry.value()["width"], entry.value()["height"], entry.value()["length"]};
 
     return data;
 }
@@ -818,7 +821,6 @@ void writeFSImageData(std::map <std::string, FSImage> data) {
         o["width"] = entry.second.width;
         o["height"] = entry.second.height;
         o["length"] = entry.second.length;
-        o["type"] = entry.second.type;
     }
     std::unique_ptr<char[]> buf(new char[MAX_IMAGE_DATA_FILE_SIZE]);
     serializeJson(doc, buf.get(), MAX_IMAGE_DATA_FILE_SIZE);
@@ -853,7 +855,6 @@ void serveImageData() {
         o["width"] = entry.second.width;
         o["height"] = entry.second.height;
         o["length"] = entry.second.length;
-        o["type"] = entry.second.type;
         o["progmem"] = false;
     }
 
@@ -884,17 +885,15 @@ void uploadImage() {
             std::map <std::string, FSImage> fsImageData = getFSImageData();
             fsImageData[server->arg("name").c_str()] = {strtoul(server->arg("width").c_str(), NULL, 10),
                                                         strtoul(server->arg("height").c_str(), NULL, 10),
-                                                        strtoul(server->arg("length").c_str(), NULL, 10),
-                                                        strtoul(server->arg("type").c_str(), NULL, 10)};
+                                                        strtoul(server->arg("length").c_str(), NULL, 10)};
             writeFSImageData(fsImageData);
             Serial.print("Image Size: ");
             Serial.println(upload.totalSize);
-            //server->send(200);
+            needsUpdate = true;
         } else {
             String filename = "/images/" + server->arg("name");
             if (LittleFS.exists(filename))
                 LittleFS.remove(filename);
-            //server->send(500, "text/plain", "500: couldn't save image");
         }
     }
 }
@@ -978,12 +977,6 @@ void serveFactoryReset() {
 void setupWebserver() {
     server = new ESP8266WebServer(80);
     server->on(F("/"), serveRoot);
-    /*server->on("/update", HTTP_OPTIONS, []() {
-        server->sendHeader("Access-Control-Max-Age", "10000");
-        server->sendHeader("Access-Control-Allow-Methods", "POST,GET,OPTIONS");
-        server->sendHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-        server->send(200, "text/plain", "");
-    });*/
     #if USE_OTA_UPDATING
     updateServer.setup(server);
     #endif
@@ -1017,38 +1010,30 @@ void setupWebserver() {
 
 #pragma region Rendering
 
-void drawImageUint8(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset,
-                    uint8_t *data, bool progMem) {
+bool checkAlphaColors(std::vector<uint16_t> alphaColors, uint16_t color) {
+    for (uint i = 0; i < alphaColors.size(); i++)
+        if (alphaColors[i] == color)
+            return true;
+    return false;
+}
+
+void drawImage(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset,
+                    uint8_t *data, std::vector<uint16_t> alphaColors, bool uInt16) {
     uint16_t line_buffer[width];
     for (uint8_t y = 0; y < height; y++) {
-        if (progMem)
-            memcpy_P(line_buffer, data + offset * width * height * 2 + y * width * 2, width * 2);
-        else
-            memcpy(line_buffer, data + offset * width * height * 2 + y * width * 2, width * 2);
-        for (uint8_t x = 0; x < width; x++)
+        memcpy_P(line_buffer, data + (offset * width * height + y * width) * 2, width * 2);
+        for (uint8_t x = 0; x < width; x++) {
+            if (checkAlphaColors(alphaColors, line_buffer[x]))
+                continue;
             d.drawPixel(xOffset + x, yOffset + y, line_buffer[x]);
+        }
         if (width * height > PIXEL_YIELD_THRESHOLD)
             yield();
     }
 }
 
-void drawImageUint16(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset,
-                     uint16_t *data, bool progMem) {
-    uint16_t line_buffer[width];
-    for (uint8_t y = 0; y < height; y++) {
-        if (progMem)
-            memcpy_P(line_buffer, data + offset * width * height + y * width, width * 2);
-        else
-            memcpy(line_buffer, data + offset * width * height * 2 + y * width * 2, width * 2);
-        for (uint8_t x = 0; x < width; x++)
-            d.drawPixel(xOffset + x, yOffset + y, line_buffer[x]);
-        if (width * height > PIXEL_YIELD_THRESHOLD)
-            yield();
-    }
-}
-
-void drawImageFsUint8(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset,
-                      const char name[], File &file) {
+void drawImageFs(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset,
+                      const char name[], std::vector<uint16_t> alphaColors, File &file) {
     if (!file) {
         if (!LittleFS.exists(name)) {
             Serial.print(F("Couldn't find image to draw for: "));
@@ -1067,15 +1052,19 @@ void drawImageFsUint8(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t
     file.seek(offset * width * height * 2);
     for (uint8_t y = 0; y < height; y++) {
         file.readBytes(line_buffer, width * 2);
-        for (uint8_t x = 0; x < width; x++)
-            d.drawPixel(xOffset + x, yOffset + y, line_buffer[x * 2] | line_buffer[x * 2 + 1] << 8);
+        for (uint8_t x = 0; x < width; x++) {
+            uint16_t color = line_buffer[x * 2] | line_buffer[x * 2 + 1] << 8;
+            if (checkAlphaColors(alphaColors, color))
+                continue;
+            d.drawPixel(xOffset + x, yOffset + y, color);
+        }
         if (width * height > PIXEL_YIELD_THRESHOLD)
             yield();
     }
 }
 
 void
-drawGimpImage(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, uint8_t height, char *data) {
+drawGimpImage(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, uint8_t height, std::vector<uint16_t> alphaColors, char *data) {
     for (uint y = 0; y < height; y++) {
         for (uint x = 0; x < width; x++) {
             uint offset = (x + y * width) * 4;
@@ -1086,7 +1075,10 @@ drawGimpImage(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, 
             uint8_t r = (((c0 - 33) << 2) | ((c1 - 33) >> 4));
             uint8_t g = ((((c1 - 33) & 0xF) << 4) | ((c2 - 33) >> 2));
             uint8_t b = ((((c2 - 33) & 0x3) << 6) | ((c3 - 33)));
-            display.drawPixel(x + xOff, y + yOff, ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+            uint16_t color = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+            if (checkAlphaColors(alphaColors, color))
+                continue;
+            display.drawPixel(x + xOff, y + yOff, color);
         }
         if (width * height > PIXEL_YIELD_THRESHOLD)
             yield();
@@ -1275,10 +1267,10 @@ void ensureTetrisAllocated(Widget &widget) {
 #if USE_TETRIS
     if (!widget.tetris) {
         widget.tetris.reset(new TetrisMatrixDraw(display));
-        DEBUG("Allocating Tetris object");
+        DEBUG("Allocating Tetris object\n");
     }
     if (!widget.tetris)
-        DEBUG("Failed to create Tetris object");
+        DEBUG("Failed to create Tetris object\n");
 #endif
 }
 
@@ -1439,23 +1431,18 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
         case WIDGET_PROGMEM_IMAGE:
             switch (progmemImages[widget.content].type) {
                 case IMAGE_UINT8:
-                    drawImageUint8(d, widget.xOff + (widget.width - progmemImages[widget.content].width) / 2,
-                                   widget.yOff + (widget.height - progmemImages[widget.content].height) / 2,
-                                   progmemImages[widget.content].width, progmemImages[widget.content].height,
-                                   widget.state + widget.offset, (uint8_t *) progmemImages[widget.content].data, true);
-                    break;
                 case IMAGE_UINT16:
-                    drawImageUint16(d, widget.xOff + (widget.width - progmemImages[widget.content].width) / 2,
+                    drawImage(d, widget.xOff + (widget.width - progmemImages[widget.content].width) / 2,
                                     widget.yOff + (widget.height - progmemImages[widget.content].height) / 2,
                                     progmemImages[widget.content].width, progmemImages[widget.content].height,
-                                    widget.state + widget.offset, (uint16_t *) progmemImages[widget.content].data,
-                                    true);
+                                    widget.state + widget.offset, (uint8_t *) progmemImages[widget.content].data,
+                                    widget.colors, progmemImages[widget.content].type == IMAGE_UINT16);
                     break;
                 case IMAGE_GIMP:
                     drawGimpImage(d, widget.xOff + (widget.width - progmemImages[widget.content].width) / 2,
                                   widget.yOff + (widget.height - progmemImages[widget.content].height) / 2,
                                   progmemImages[widget.content].width, progmemImages[widget.content].height,
-                                  (char *) progmemImages[widget.content].data);
+                                  widget.colors, (char *) progmemImages[widget.content].data);
                     break;
                 default:
                     Serial.println(F("Unknown image type"));
@@ -1463,8 +1450,8 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
             }
             break;
         case WIDGET_FS_IMAGE:
-            drawImageFsUint8(d, widget.xOff, widget.yOff, widget.width, widget.height, widget.state + widget.offset,
-                             ("/images/" + widget.content).c_str(), widget.file);
+            drawImageFs(d, widget.xOff, widget.yOff, widget.width, widget.height, widget.state + widget.offset,
+                             ("/images/" + widget.content).c_str(), widget.colors, widget.file);
             break;
         case WIDGET_ANALOG_CLOCK:
             drawAnalogClock(d, widget.xOff + widget.height / 2, widget.yOff + widget.height / 2,

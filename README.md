@@ -64,6 +64,7 @@ To use Arduino IDE, the following libraries must be installed through the librar
 * WeatherStation (And dependencies)
 * Timezone
 * RunningAverage (If using brightness sensor "rolling" average)
+* TetrisAnimation (If using Tetris font)
 
 The ESP8266 board support must be installed from 
 [here](https://github.com/esp8266/Arduino#installing-with-boards-manager).

@@ -35,12 +35,13 @@ export default {
     progress: -1,
     binary: null,
     inProgress: false,
-    file: '',
+    file: null,
     manual: false
   }),
   methods: {
-    onSelect(file) {
-      this.binary = file[0]
+    onSelect(files) {
+      if (files.length> 0)
+        this.binary = files[0]
     },
     async abortUpdate() {
       try {
@@ -101,7 +102,8 @@ export default {
           onUploadProgress: this.onUploadProgress,
         }).then(response => {
           this.progress = -1;
-          this.file = ''
+          this.file = null
+          this.binary = null
           if (response.data.includes('Update Success!')) {
             this.info('Success', 'Successfully updated display', true)
             this.waitForPromiseSuccess(this.getStats).then()

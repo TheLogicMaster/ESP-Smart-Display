@@ -3,7 +3,7 @@
     <md-card>
       <md-card-header>
         <div class="md-title">
-          Editing <i> {{ $route.params.name | remove_P }}</i>
+          Editing <i> {{ $route.params.name }}</i>
         </div>
         <div>
           <md-button class="md-accent md-raised" @click="reload(true)">Reload</md-button>
@@ -19,6 +19,9 @@
           </md-button>
           <md-button class="md-icon-button" @click="downloadDialog = true">
             <md-icon>save_alt</md-icon>
+          </md-button>
+          <md-button class="md-icon-button" @click="uploadDialog = true">
+            <md-icon>add_box</md-icon>
           </md-button>
         </div>
         <div>
@@ -40,11 +43,18 @@
           </md-button>
         </div>
         <div>
-          <md-button class="md-icon-button" @click="frameBack">
+          <md-button class="md-icon-button" @click="deleteFrame" :disabled="frame <= 0">
+            <md-icon>clear</md-icon>
+          </md-button>
+          <md-button class="md-icon-button" @click="frameBack" :disabled="frame <= 0">
             <md-icon>arrow_back</md-icon>
           </md-button>
-          <md-button class="md-icon-button" @click="frameForward">
+          <b>{{ frame + 1}}</b>
+          <md-button class="md-icon-button" @click="frameForward" :disabled="frame >= frames - 1">
             <md-icon>arrow_forward</md-icon>
+          </md-button>
+          <md-button class="md-icon-button" @click="addFrame">
+            <md-icon>add</md-icon>
           </md-button>
         </div>
       </md-card-header>
@@ -78,11 +88,46 @@
         <md-button class="md-accent md-raised" @click="download">Download</md-button>
       </md-dialog-actions>
     </md-dialog>
+    <md-dialog :md-active.sync="uploadDialog">
+      <md-dialog-title>Insert Image</md-dialog-title>
+      <md-field>
+        <label>Image</label>
+        <md-file accept=".bin,.jpg,.jpeg,.png" @md-change="onUploadImage"/>
+      </md-field>
+      <div>
+        <md-field class="upload-field">
+          <label>Width</label>
+          <md-input :min="1" :max="$store.state.stats.width" type="number" v-model.number="uploadWidth"></md-input>
+        </md-field>
+        <md-field class="upload-field">
+          <label>Height</label>
+          <md-input :min="1" :max="$store.state.stats.height" type="number" v-model.number="uploadHeight"></md-input>
+        </md-field>
+      </div>
+      <div>
+        <md-field class="upload-field">
+          <label>X Offset</label>
+          <md-input :min="0" :max="$store.state.stats.width - 1" type="number" v-model.number="uploadX"></md-input>
+        </md-field>
+        <md-field class="upload-field">
+          <label>Y Offset</label>
+          <md-input :min="0" :max="$store.state.stats.height - 1" type="number" v-model.number="uploadY"></md-input>
+        </md-field>
+      </div>
+      <md-field class="upload-field" v-if="uploadFrames > 0">
+        <label>Animation Frame</label>
+        <md-input :min="1" :max="uploadFrames" type="number" v-model.number="uploadFrame"></md-input>
+      </md-field>
+      <md-dialog-actions>
+        <md-button class="md-accent md-raised" @click="uploadDialog = false">Cancel</md-button>
+        <md-button class="md-accent md-raised" @click="upload">Insert</md-button>
+      </md-dialog-actions>
+    </md-dialog>
     <md-dialog-prompt
         :md-active.sync="saveAsPrompt"
         v-model="saveAsName"
         md-title="Enter name to save as"
-        md-input-maxlength="30"
+        :md-input-maxlength="this.$store.state.stats['maxPathLength'] - 8"
         md-input-placeholder="Enter image name..."
         md-confirm-text="Save"
         md-cancel-text="Cancel"
@@ -128,9 +173,71 @@ export default {
     errorAlert: false,
     errorAlertText: '',
     downloadDialog: false,
-    downloadType: 0
+    downloadType: 0,
+    uploadDialog: false,
+    uploadFile: null,
+    uploadWidth: 32,
+    uploadHeight: 32,
+    uploadX: 0,
+    uploadY: 0,
+    uploadFrames: 0,
+    uploadFrame: 1
   }),
   methods: {
+    deleteFrame() {
+      this.pixels.splice(this.frame * this.width * this.height, this.width * this.height)
+      this.frames--
+      this.frame--
+      this.drawImage()
+    },
+    addFrame() {
+      let frame = []
+      frame.length = this.width * this.height
+      frame.fill(this.color, 0, this.width * this.height)
+      this.pixels.splice((this.frame + 1) * this.width * this.height, 0, ...frame)
+      this.frames++
+    },
+    onUploadImage(files) {
+      if (files.length > 0)
+        this.uploadFile = files[0]
+      this.uploadFrame = 1
+      if (this.uploadFile.name.endsWith('.bin')) {
+        let info = this.parseBinaryFilename(this.uploadFile.name)
+        this.uploadWidth = info.width
+        this.uploadHeight = info.height
+        this.uploadFrames = info.frames
+      } else {
+        this.uploadFrames = 0
+        this.uploadWidth = this.width
+        this.uploadHeight = this.height
+      }
+    },
+    async upload() {
+      if (!this.uploadFile)
+        return
+
+      if (this.uploadFile.name.endsWith('.bin')) {
+        let pixels = this.parseImageData(await this.uploadFile.arrayBuffer())
+        for (let y = 0; y < this.uploadHeight; y++)
+          for (let x = 0; x < this.uploadWidth; x++) {
+            if (x + this.uploadX >= this.$store.state.stats.width || y + this.uploadY >= this.$store.state.stats.height)
+              continue
+            this.drawPixel(x + this.uploadX, y + this.uploadY, pixels[x + y * this.uploadWidth + this.uploadWidth * this.uploadHeight * (this.uploadFrame - 1)])
+          }
+      } else {
+        let image = await this.$jimp.create(await this.uploadFile.arrayBuffer())
+        await image.resize(this.uploadWidth, this.uploadHeight)
+        for (let y = 0; y < this.uploadHeight; y++)
+          for (let x = 0; x < this.uploadWidth; x++) {
+            if (x + this.uploadX >= this.$store.state.stats.width || y + this.uploadY >= this.$store.state.stats.height)
+              continue
+            this.drawPixel(x + this.uploadX, y + this.uploadY, this.rgbObjectToHex(this.$jimp.intToRGBA(await image.getPixelColor(x, y))))
+          }
+      }
+      this.uploadDialog = false
+      this.uploadFrames = 0
+      this.uploadFrame = 1
+    },
     async editorDeleteImage() {
       await this.deleteImage(this.$route.params.name)
       await this.$router.push('/images')
@@ -313,7 +420,10 @@ export default {
       let buffer = new Uint16Array(this.width * this.height * this.frames)
       for (let i = 0; i < buffer.length; i++)
         buffer[i] = this.pack565Color(this.hexToRgb(this.pixels[i]))
-      await this.saveImageBuffer(name, this.$store.state.imageData[this.$route.params.name], buffer)
+      let data = this.cloneObject(this.$store.state.imageData[this.$route.params.name])
+      data.length = this.frames
+      if (await this.saveImageBuffer(name, data, buffer))
+        await this.getImage(this.$route.params.name)
     },
     clear() {
       this.history = []
@@ -362,7 +472,6 @@ export default {
     }
   },
   async mounted() {
-    this.encodeGimpColor(this.decodeGimpImage('-G37'))
     if (!this.$store.state.imageData.hasOwnProperty(this.$route.params.name))
       await this.waitForPromiseSuccess(this.getImageData)
     if (!this.$store.state.imageData.hasOwnProperty(this.$route.params.name)) {
@@ -390,6 +499,11 @@ export default {
 <style scoped>
 .md-radio {
   display: flex;
+}
+
+.upload-field {
+  width: 50%;
+  display: inline-block;
 }
 
 .md-card {

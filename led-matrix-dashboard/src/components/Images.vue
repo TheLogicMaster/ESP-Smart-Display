@@ -3,7 +3,7 @@
     <div class="md-layout md-alignment-space-between-left">
       <md-button class="md-accent md-raised md-layout-item" @click="refreshImages(true)">Refresh</md-button>
       <md-button class="md-accent md-raised md-layout-item" @click="createImageDialog = true">Create Image</md-button>
-      <input type="file" hidden ref="importFile" @change="onSelectImport">
+      <input type="file" hidden ref="importFile" @input="onSelectImport">
       <md-button class="md-accent md-raised md-layout-item" @click="$refs.importFile.click()">Import Image</md-button>
     </div>
     <div>
@@ -24,7 +24,7 @@
       <md-dialog-title>Create Image</md-dialog-title>
       <md-field class="field">
         <label>Image Name</label>
-        <md-input v-model="name"></md-input>
+        <md-input :maxlength="this.$store.state.stats['maxPathLength'] - 8" v-model="name"></md-input>
       </md-field>
       <div class="field">
         <label class="label">Image Width</label>
@@ -42,6 +42,31 @@
       <md-dialog-actions>
         <md-button class="md-accent md-raised" @click="createImageDialog = false">Close</md-button>
         <md-button class="md-accent md-raised" @click="createImage">Create</md-button>
+      </md-dialog-actions>
+    </md-dialog>
+
+    <md-dialog :md-active.sync="importImageDialog">
+      <md-dialog-title>Create Image</md-dialog-title>
+      <md-field class="field">
+        <label>Image Name</label>
+        <md-input :maxlength="this.$store.state.stats['maxPathLength'] - 8" v-model="name"></md-input>
+      </md-field>
+      <div class="field">
+        <label class="label">Image Width</label>
+        <input class="" min="1" :max="displayWidth" type="number" v-model.number="width">
+      </div>
+      <div class="field">
+        <label class="label">Image Height</label>
+        <input class="" min="1" :max="displayHeight" type="number" v-model.number="height">
+      </div>
+      <div class="field">
+        <label class="label">Image Frames</label>
+        <input class="" min="1" max="100" type="number" v-model.number="frames">
+      </div>
+
+      <md-dialog-actions>
+        <md-button class="md-accent md-raised" @click="importImageDialog = false">Close</md-button>
+        <md-button class="md-accent md-raised" @click="importImage">Create</md-button>
       </md-dialog-actions>
     </md-dialog>
 
@@ -72,6 +97,7 @@ export default {
   data: () => ({
     deleteConfirm: false,
     createImageDialog: false,
+    importImageDialog: false,
     deleteImageName: '',
     displayWidth: 64,
     displayHeight: 32,
@@ -83,8 +109,50 @@ export default {
     importFile: null
   }),
   methods: {
-    onSelectImport(file) {
-      this.importFile = file[0]
+    async onSelectImport(event) {
+      if (event.target.files === 0)
+        return
+      this.importFile = event.target.files[0]
+      if (this.importFile.name.endsWith('.bin')) {
+        let info = this.parseBinaryFilename(this.importFile.name)
+        this.width = info.width
+        this.height = info.height
+        this.frames = info.frames
+        this.name = info.name
+      } else {
+        this.frames = 1
+        let image = await this.$jimp.create(await this.importFile.arrayBuffer())
+        let ratio = Math.min(this.$store.state.stats.height / image.getHeight(), this.$store.state.stats.width / image.getWidth())
+        this.width = Math.round(image.getWidth() * ratio)
+        this.height = Math.round(image.getHeight() * ratio)
+        this.name = this.importFile.name.split('.')[0]
+        this.name = this.name.substr(0, Math.min(this.$store.state.stats['maxPathLength'] - 8, this.name.length))
+      }
+      this.importImageDialog = true
+    },
+    async importImage(){
+      let info = {
+        width: this.width,
+        height: this.height,
+        length: this.length
+      }
+      if (this.importFile.name.endsWith('.bin')) {
+        await this.saveImageBuffer(this.name, info, await this.importFile.arrayBuffer())
+      } else {
+        let buffer = new Uint16Array(this.width * this.height * this.frames)
+        let image = await this.$jimp.create(await this.importFile.arrayBuffer())
+        await image.resize(this.width, this.height)
+        for (let y = 0; y < this.height; y++)
+          for (let x = 0; x < this.width; x++)
+            buffer[this.width * y + x] = this.pack565Color(this.$jimp.intToRGBA(await image.getPixelColor(x, y)))
+        await this.saveImageBuffer(this.name, info, buffer)
+      }
+      this.importImageDialog = false
+      this.name = ''
+      this.width = this.displayWidth
+      this.height = this.displayHeight
+      this.frames = 1
+      await this.getImageData()
     },
     async createImage() {
       let buffer = new Uint16Array(this.width * this.height * this.frames).fill(this.pack565Color({r: 255, g: 0, b: 0}))
