@@ -43,16 +43,18 @@ import 'vue-material/dist/vue-material.min.css'
 //import 'vue-material/dist/theme/default.css'
 import 'vue-material/dist/theme/black-green-light.css'
 //import 'vue-material/dist/theme/black-green-light.css'
-import Controls from "@/components/Controls";
-import Editor from "@/components/Editor";
-import Display from "@/components/Display";
-import Images from "@/components/Images";
-import ImageEditor from "@/components/ImageEditor";
-import Settings from "@/components/Settings";
+import Controls from "@/components/Controls"
+import Editor from "@/components/Editor"
+import Display from "@/components/Display"
+import Images from "@/components/Images"
+import ImageEditor from "@/components/ImageEditor"
+import Settings from "@/components/Settings"
 import Jimp from 'jimp'
 import download from 'downloadjs'
 import interact from 'interactjs'
 import Snotify, {SnotifyPosition} from 'vue-snotify'
+import Backup from "@/components/Backup"
+import JSZip from "jszip";
 
 Vue.use(Snotify, {
   toast: {
@@ -334,10 +336,8 @@ Vue.mixin({
       else {
         let buffer = Buffer.from(data, 'binary')
         let array = new Uint16Array(buffer.buffer, buffer.byteOffset, buffer.length / Uint16Array.BYTES_PER_ELEMENT)
-        for (let i = 0; i < array.length; i++) {
-          let color = this.unpack565Color(array[i])
-          pixels[i] = this.rgbToHex(color.r, color.g, color.b)
-        }
+        for (let i = 0; i < array.length; i++)
+          pixels[i] = this.rgbObjectToHex(this.unpack565Color(array[i]))
       }
       return pixels
     },
@@ -357,6 +357,28 @@ Vue.mixin({
       } catch (error) {
         console.error(error)
         store.commit('set', ['loadingImage', ''])
+        return false
+      }
+    },
+    validateFilename(name) {
+      return /^[0-9a-zA-Z ]+$/.test(name)
+    },
+    async getRandomName() {
+      try {
+        return (await this.$axios.get('http://names.drycodes.com/1?combine=2&separator=+&format=json')).data[0]
+      } catch (error) {
+        console.error(error)
+        return 'Random Name'
+      }
+    },
+    async renameImage(image, newName) {
+      try {
+        await axios.post('/renameImage', '', {params: {name: image, newName: newName}})
+        await this.refreshImages(true)
+        return true
+      } catch (error) {
+        this.error('Error', 'Failed to rename image: ' + error)
+        console.error(error)
         return false
       }
     },
@@ -389,6 +411,53 @@ Vue.mixin({
       return {
         width: (font === 0 ? 4 : (font === 1 ? 7 : 6 * Math.pow(2, font - 2))) * length + (font === 1 ? 2 : 0),
         height: font === 0 ? 5 : (font === 1 ? 20 : 7 * Math.pow(2, font - 2))
+      }
+    },
+    async downloadBackup() {
+      if (await this.refreshImages(true)) {
+        let zip = new JSZip()
+        let imageDir = zip.folder('images')
+        for (let image in store.state.imageData) {
+          let data = store.state.imageData[image]
+          if (data.progmem)
+            continue
+          let buffer = new Uint16Array(data.width * data.height * data.length)
+          for (let i = 0; i < buffer.length; i++)
+            buffer[i] = this.pack565Color(this.hexToRgb(store.state.images[image][i]))
+          imageDir.file(`${image}-${data.width}-${data.height}-${data.length}.bin`, buffer.buffer)
+        }
+        zip.file('config.json', JSON.stringify(store.state.configuration))
+        let blob = await zip.generateAsync({type:"blob"})
+        download(blob, 'Display-Backup.zip')
+      } else {
+        this.error('Error', 'Failed to get images for backup')
+      }
+    },
+    async loadBackup(data) {
+      try {
+        let zip = await JSZip.loadAsync(data)
+        await this.saveConfig(JSON.parse(await zip.file('config.json').async('string')))
+        let images = {}
+        zip.folder('images').forEach((name, file) => images[name] = file)
+        for (let image in images) {
+          let info = this.parseBinaryFilename(images[image].name.split('images/')[1])
+          let attempts = 0
+          while (attempts < 3) {
+            if (await this.saveImageBuffer(info.name, info, await images[image].async('arraybuffer')))
+              break
+            attempts++
+          }
+          if (attempts >= 5) {
+            this.error('Error', 'Failed to restore all images, try restoring again')
+            return false
+          }
+        }
+        this.info('Success', 'Loaded display backup successfully')
+        return true
+      } catch (error) {
+        console.error(error)
+        this.error('Error', 'Failed to load backup: ' + error)
+        return false
       }
     },
     getWidgetMinimumSize(widget) {
@@ -620,8 +689,8 @@ Vue.mixin({
       if (Vue.prototype.$demoMode)
         return true
       try {
-        store.commit('set', ['configuration', this.cloneObject(config)])
         await axios.post('/config', this.cleanConfig(this.cloneObject(config)), {timeout: 10000})
+        store.commit('set', ['configuration', this.cloneObject(config)])
         return true
       } catch (error) {
         console.log(error)
@@ -675,7 +744,8 @@ const routes = [
   {path: '/update', component: OTAUpdate},
   {path: '/controls', component: Controls},
   {path: '/editor', component: Editor},
-  {path: '/settings', component: Settings}
+  {path: '/settings', component: Settings},
+  {path: '/backup', component: Backup}
 ]
 
 const router = new Router({

@@ -84,10 +84,10 @@ export default {
       this.widget.xOff = this.constrainRawValue(this.rawX, 0, this.$store.state.stats.width - 1)
       this.widget.yOff = this.constrainRawValue(this.rawY, 0, this.$store.state.stats.height - 1)
       if (this.widget.type !== 3) {
-        this.widget.width = this.constrainRawValue(this.rawWidth, 1, this.$store.state.stats.width)
-        this.widget.height = this.constrainRawValue(this.rawHeight, 1, this.$store.state.stats.height)
+        this.widget.width = this.constrainRawValue(this.rawWidth, 1, this.$store.state.stats.width * 2)
+        this.widget.height = this.constrainRawValue(this.rawHeight, 1, this.$store.state.stats.height * 2)
       } else {
-        let length = Math.min(this.$store.state.stats.width, this.$store.state.stats.height)
+        let length = Math.min(this.$store.state.stats.width * 2, this.$store.state.stats.height * 2)
         this.widget.width = this.constrainRawValue(this.rawWidth, 1, length)
         this.widget.height = this.constrainRawValue(this.rawHeight, 1, length)
         this.widget.height = this.widget.width = Math.max(this.widget.height, this.widget.width)
@@ -103,8 +103,8 @@ export default {
       let minimumWidget = this.getWidgetMinimumSize(widget)
       this.minimumWidth = minimumWidget.width
       this.minimumHeight = minimumWidget.height
-      widget.width = Math.min(Math.max(widget.width, this.minimumWidth), this.$store.state.stats.width)
-      widget.height = Math.min(Math.max(widget.height, this.minimumHeight), this.$store.state.stats.height)
+      widget.width = Math.min(Math.max(widget.width, this.minimumWidth), this.$store.state.stats.width * 2)
+      widget.height = Math.min(Math.max(widget.height, this.minimumHeight), this.$store.state.stats.height * 2)
       this.currentWidget = this.cloneObject(widget)
       this.resetRawCoords(widget)
 
@@ -127,7 +127,7 @@ export default {
           modifiers: [
             this.$interact.modifiers.restrictSize({
               min: {width: this.minimumWidth * this.pixelSize, height: this.minimumHeight * this.pixelSize},
-              max: {width: 64 * this.pixelSize, height: 32 * this.pixelSize}, // Todo: switch to display size
+              max: {width: this.$store.state.stats.width * 2 * this.pixelSize, height: this.$store.state.stats.height * 2 * this.pixelSize}, // Todo: switch to display size
             })
           ],
           edges: {

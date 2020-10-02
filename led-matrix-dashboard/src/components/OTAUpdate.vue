@@ -16,7 +16,7 @@
           <md-checkbox v-model="manual" :disabled="progress >= 0">Manual</md-checkbox>
           <md-field v-if="manual">
             <label>Binary</label>
-            <md-file v-model="file" accept=".bin,.bin.gz" @md-change="onSelect" :disabled="progress >= 0"/>
+            <md-file accept=".bin,.bin.gz" @md-change="onSelect" :disabled="progress >= 0"/>
           </md-field>
           <md-button class="md-accent md-raised" type="submit" :disabled="progress >= 0">Update</md-button>
         </form>
@@ -35,7 +35,6 @@ export default {
     progress: -1,
     binary: null,
     inProgress: false,
-    file: null,
     manual: false
   }),
   methods: {
@@ -60,7 +59,7 @@ export default {
           this.error('Error', 'A binary file is required')
           return
         }
-        if (!this.file.endsWith('.bin') && !window.confirm('Are you sure you want to proceed? This does not appear to be an update file.'))
+        if (!this.binary.name.endsWith('.bin') && !window.confirm('Are you sure you want to proceed? This does not appear to be an update file.'))
           return
       } else {
         try {
@@ -102,7 +101,6 @@ export default {
           onUploadProgress: this.onUploadProgress,
         }).then(response => {
           this.progress = -1;
-          this.file = null
           this.binary = null
           if (response.data.includes('Update Success!')) {
             this.info('Success', 'Successfully updated display', true)

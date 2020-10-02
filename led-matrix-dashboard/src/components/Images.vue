@@ -2,13 +2,18 @@
   <div>
     <div class="md-layout md-alignment-space-between-left">
       <md-button class="md-accent md-raised md-layout-item" @click="refreshImages(true)">Refresh</md-button>
-      <md-button class="md-accent md-raised md-layout-item" @click="createImageDialog = true">Create Image</md-button>
+      <md-button class="md-accent md-raised md-layout-item" @click="openCreateDialog">Create Image</md-button>
       <input type="file" hidden ref="importFile" @input="onSelectImport">
       <md-button class="md-accent md-raised md-layout-item" @click="$refs.importFile.click()">Import Image</md-button>
     </div>
     <div>
       <md-card v-for="(data, image) in this.$store.state.imageData" v-bind:key="image">
-        <md-card-header class="md-title">{{ image }}</md-card-header>
+        <md-card-header class="md-title">
+          {{ image }}
+          <md-button v-if="!$store.state.imageData[image].progmem" class="md-icon-button" @click="openRenameDialog(image)">
+            <md-icon>create</md-icon>
+          </md-button>
+        </md-card-header>
         <md-card-media>
           <image-preview :interval="0" :frame="0" :frames="1" :progress-bar="true" :pixel-size="pixelSize" :image="image" :canvas-height="pixelSize * data.height" :canvas-width="pixelSize * data.width"></image-preview>
         </md-card-media>
@@ -22,9 +27,10 @@
 
     <md-dialog :md-active.sync="createImageDialog">
       <md-dialog-title>Create Image</md-dialog-title>
-      <md-field class="field">
+      <md-field class="field" :class="{'md-invalid': !nameValid}">
         <label>Image Name</label>
-        <md-input :maxlength="this.$store.state.stats['maxPathLength'] - 8" v-model="name"></md-input>
+        <md-input :maxlength="this.$store.state.stats['maxPathLength'] - 8" v-model="name" @change="changeName"></md-input>
+        <span class="md-error">Only alphanumeric and spaces</span>
       </md-field>
       <div class="field">
         <label class="label">Image Width</label>
@@ -45,11 +51,25 @@
       </md-dialog-actions>
     </md-dialog>
 
+    <md-dialog :md-active.sync="renameDialog">
+      <md-dialog-title>Rename {{ renameName }}</md-dialog-title>
+      <md-field class="field" :class="{'md-invalid': !renameNameValid}">
+        <label>New Name</label>
+        <md-input :maxlength="this.$store.state.stats['maxPathLength'] - 8" v-model="newName" @change="changeRenameName"></md-input>
+        <span class="md-error">Only alphanumeric and spaces</span>
+      </md-field>
+      <md-dialog-actions>
+        <md-button class="md-accent md-raised" @click="renameDialog = false">Close</md-button>
+        <md-button class="md-accent md-raised" @click="rename">Rename</md-button>
+      </md-dialog-actions>
+    </md-dialog>
+
     <md-dialog :md-active.sync="importImageDialog">
       <md-dialog-title>Create Image</md-dialog-title>
-      <md-field class="field">
+      <md-field class="field" :class="{'md-invalid': !nameValid}">
         <label>Image Name</label>
-        <md-input :maxlength="this.$store.state.stats['maxPathLength'] - 8" v-model="name"></md-input>
+        <md-input :maxlength="this.$store.state.stats['maxPathLength'] - 8" v-model="name" @change="changeName"></md-input>
+        <span class="md-error">Only alphanumeric and spaces</span>
       </md-field>
       <div class="field">
         <label class="label">Image Width</label>
@@ -98,6 +118,7 @@ export default {
     deleteConfirm: false,
     createImageDialog: false,
     importImageDialog: false,
+    renameDialog: false,
     deleteImageName: '',
     displayWidth: 64,
     displayHeight: 32,
@@ -106,13 +127,43 @@ export default {
     width: 1,
     height: 1,
     name: '',
-    importFile: null
+    nameValid: true,
+    importFile: null,
+    renameName: '',
+    newName: '',
+    renameNameValid: true
   }),
   methods: {
+    changeRenameName() {
+      this.renameNameValid = this.validateFilename(this.newName)
+    },
+    changeName() {
+      this.nameValid = this.validateFilename(this.name)
+    },
+    async openCreateDialog() {
+      this.createImageDialog = true
+      this.name = ''
+      this.name = await this.getRandomName()
+    },
+    openRenameDialog(image) {
+      this.renameDialog = true
+      this.renameName = image
+      this.newName = image
+      this.renameNameValid = true
+    },
+    async rename() {
+      if (!this.validateFilename(this.newName))
+        return
+      this.renameDialog = false
+      if (this.newName === this.renameName)
+        return
+      await this.renameImage(this.renameName, this.newName)
+    },
     async onSelectImport(event) {
       if (event.target.files === 0)
         return
       this.importFile = event.target.files[0]
+      this.$refs.importFile.value = ''
       if (this.importFile.name.endsWith('.bin')) {
         let info = this.parseBinaryFilename(this.importFile.name)
         this.width = info.width
@@ -134,7 +185,7 @@ export default {
       let info = {
         width: this.width,
         height: this.height,
-        length: this.length
+        length: this.frames
       }
       if (this.importFile.name.endsWith('.bin')) {
         await this.saveImageBuffer(this.name, info, await this.importFile.arrayBuffer())

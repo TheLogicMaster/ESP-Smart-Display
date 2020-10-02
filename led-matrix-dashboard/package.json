@@ -22,7 +22,8 @@
     "vue-scrollto": "^2.18.2",
     "vuelidate": "~0.7.5",
     "vuex": "^3.5.1",
-    "vue-snotify": "^3.2.1"
+    "vue-snotify": "^3.2.1",
+    "jszip": "^3.5.0"
   },
   "devDependencies": {
     "@vue/cli-plugin-babel": "^4.5.6",

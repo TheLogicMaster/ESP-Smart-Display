@@ -122,12 +122,12 @@
       <div v-if="widget.type !== 0 && widget.type !== 1 && widget.type !== 3">
         <div class="field">
           <label class="label">Widget Width</label>
-          <input class="" :min="getWidgetMinimumSize(widget).width" :max="$store.state.stats.width" type="number"
+          <input class="" :min="getWidgetMinimumSize(widget).width" :max="$store.state.stats.width * 2" type="number"
                  v-model.number="widget.width">
         </div>
         <div class="field">
           <label class="label">Widget Height</label>
-          <input class="" :min="getWidgetMinimumSize(widget).height" :max="$store.state.stats.height" type="number"
+          <input class="" :min="getWidgetMinimumSize(widget).height" :max="$store.state.stats.height * 2" type="number"
                  v-model.number="widget.height">
         </div>
       </div>

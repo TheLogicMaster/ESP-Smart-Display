@@ -913,9 +913,27 @@ void serveImage() {
         server->send_P(200, "application/binary", (PGM_P) progmemImages[progmem].data, size);
     } else {
         if (!sendFile("/images/" + image, false)) {
-            Serial.printf("Image doesn't exist %s\n", image.c_str());
+            DEBUG("Image doesn't exist: %s\n", image.c_str());
             server->send(404);
         }
+    }
+}
+
+void serveRenameImage() {
+    String name = server->arg(F("name"));
+    String newName = server->arg(F("newName"));
+    if (!LittleFS.exists("/images/" + name)) {
+        DEBUG("Image to rename doesn't exist: %s\n", name.c_str());
+        server->send(404);
+    } else {
+        if (LittleFS.exists("/images/" + newName))
+            LittleFS.remove("/images/" + newName);
+        LittleFS.rename("/images/" + name, "/images/" + newName);
+        std::map <std::string, FSImage> fsImageData = getFSImageData();
+        fsImageData[newName.c_str()] = fsImageData[name.c_str()];
+        fsImageData.erase(name.c_str());
+        writeFSImageData(fsImageData);
+        server->send(200);
     }
 }
 
@@ -999,6 +1017,7 @@ void setupWebserver() {
     server->on(F("/images"), serveImageData);
     server->on(F("/deleteImage"), serveDeleteImage);
     server->on(F("/deleteAllImages"), serveDeleteAllImages);
+    server->on(F("/renameImage"), serveRenameImage);
     server->on(F("/factoryReset"), serveFactoryReset);
     server->on(F("/resetConfiguration"), serveResetConfiguration);
     server->onNotFound(serveNotFound);
