@@ -127,7 +127,7 @@ export default {
           modifiers: [
             this.$interact.modifiers.restrictSize({
               min: {width: this.minimumWidth * this.pixelSize, height: this.minimumHeight * this.pixelSize},
-              max: {width: this.$store.state.stats.width * 2 * this.pixelSize, height: this.$store.state.stats.height * 2 * this.pixelSize}, // Todo: switch to display size
+              max: {width: this.$store.state.stats.width * 2 * this.pixelSize, height: this.$store.state.stats.height * 2 * this.pixelSize},
             })
           ],
           edges: {

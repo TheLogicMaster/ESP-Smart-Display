@@ -112,20 +112,17 @@ export default {
     await this.reload()
   },
   methods: {
-    confirmReload() {
-      if (this.areObjectsEqual(this.$store.state.configuration, this.config))
-        this.reload().then()
-      else
-        this.confirm(() => this.reload().then(), () => {},
-            'Reload Settings', 'Are you sure you want to reload the settings? This will erase unsaved changes.')
+    async confirmReload() {
+      if (this.areObjectsEqual(this.$store.state.configuration, this.config) || (await this.confirmAsync('Reload Settings', 'Are you sure you want to reload the settings? This will erase unsaved changes.')))
+        await this.reload()
     },
     async reload() {
       await this.waitForPromiseSuccess(this.getConfig, 500)
       this.config = this.cloneObject(this.$store.state.configuration)
     },
-    confirmSave() {
-      this.confirm(() => this.save().then(), () => {}, 'Save Settings',
-          'Are you sure you want to update the display settings? This will overwrite the current settings.')
+    async confirmSave() {
+      if (await this.confirmAsync('Save Settings','Are you sure you want to update the display settings? This will overwrite the current settings.'))
+        await this.save()
     },
     async save() {
       if (await this.saveConfig(this.config))

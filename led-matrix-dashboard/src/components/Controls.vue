@@ -20,15 +20,18 @@ export default {
     }
   }),
   methods: {
-    sendCommand(name) {
-      this.confirm(() => {
-        this.$axios.post(this.commands[name]).then(response => {
-          if (response.status !== 200)
-            this.error('Error', 'Failed to send command to display.')
-        }).catch(error => {
-          this.error('Error', 'Failed to send command to display: ' + error)
-        })
-      }, () => {}, 'Send Command', `Are you sure you want to send command '${name}'?`)
+    async sendCommand(name) {
+      if (!(await this.confirmAsync('Send Command', `Are you sure you want to send command '${name}'?`)))
+        return
+
+      try {
+        let response = await this.$axios.post(this.commands[name])
+        if (response.status !== 200)
+          this.error('Error', 'Failed to send command to display.')
+      } catch (error) {
+        this.error('Error', 'Failed to send command to display: ' + error)
+        console.error(error)
+      }
     }
   }
 }

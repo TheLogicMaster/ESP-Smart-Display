@@ -10,7 +10,7 @@
         <div v-else-if="this.$store.state.latestVersion !== this.$dashboardVersion">Dashboard out of date</div>
         <div v-else>Up to date</div>
         <md-progress-bar v-if="progress >= 0" md-mode="determinate" :md-value="progress"></md-progress-bar>
-        <form novalidate class="md-layout" @submit.prevent="submit">
+        <form novalidate class="md-layout" @submit.prevent="updateDialog = true">
           <md-radio v-model="selected" value="firmware" :disabled="progress >= 0">Firmware</md-radio>
           <md-radio v-model="selected" value="filesystem" :disabled="progress >= 0">Dashboard</md-radio>
           <md-checkbox v-model="manual" :disabled="progress >= 0">Manual</md-checkbox>
@@ -22,6 +22,19 @@
         </form>
       </md-card-content>
     </md-card>
+
+    <md-dialog :md-active.sync="updateDialog">
+      <md-dialog-title>Update Display</md-dialog-title>
+      <md-dialog-content style="width: 300px">
+        Are you sure you want to update the display? The display will be factory reset in the process, so make sure you have
+        saved a backup of the configuration before updating. All custom images and settings will be lost.
+      </md-dialog-content>
+      <md-dialog-actions>
+        <md-button class="md-accent md-raised" @click="updateDialog = false">Cancel</md-button>
+        <md-button class="md-accent md-raised" @click="downloadBackup">Download Backup</md-button>
+        <md-button class="md-accent md-raised" @click="update">Update</md-button>
+      </md-dialog-actions>
+    </md-dialog>
   </div>
 </template>
 
@@ -35,7 +48,8 @@ export default {
     progress: -1,
     binary: null,
     inProgress: false,
-    manual: false
+    manual: false,
+    updateDialog: false
   }),
   methods: {
     onSelect(files) {
@@ -51,7 +65,8 @@ export default {
         return false
       }
     },
-    async submit() {
+    async update() {
+      this.updateDialog = false
       let binary = this.binary
 
       if (this.manual) {
@@ -59,16 +74,16 @@ export default {
           this.error('Error', 'A binary file is required')
           return
         }
-        if (!this.binary.name.endsWith('.bin') && !window.confirm('Are you sure you want to proceed? This does not appear to be an update file.'))
+        if (!this.binary.name.endsWith('.bin') && !(await this.confirmAsync('Update Binary', 'Are you sure you want to proceed? This does not appear to be an update file')))
           return
       } else {
         try {
           await this.waitForPromiseSuccess(this.getStats)
           if (this.selected === 'firmware') {
-            if (this.$store.state.latestVersion === this.$store.state.stats.version && !window.confirm('It looks like your firmware is up to date, update anyway?'))
+            if (this.$store.state.latestVersion === this.$store.state.stats.version && !(await this.confirmAsync('Update Firmware', 'It looks like your firmware is up to date, update anyway?')))
               return
           } else {
-            if (this.$store.state.latestVersion === this.$dashboardVersion && !window.confirm('It looks like your dashboard is up to date, update anyway?'))
+            if (this.$store.state.latestVersion === this.$dashboardVersion && !(await this.confirmAsync('Update Dashboard', 'It looks like your dashboard is up to date, update anyway?')))
               return
           }
           let assets = (await this.$axios.get(`https://api.github.com/repos/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest`)).data.assets
@@ -90,37 +105,33 @@ export default {
         }
       }
 
-      this.$axios.post('/beginUpdate').then(() => {
+      try {
+        await this.$axios.post('/beginUpdate')
         let form = new FormData()
         form.append(this.selected, binary)
         this.progress = 0
-        this.$axios.post('/update', form, {
+        let response = await this.$axios.post('/update', form, {
           headers: {
             'Content-Type': 'multipart/form-data',
           },
           onUploadProgress: this.onUploadProgress,
-        }).then(response => {
-          this.progress = -1;
-          this.binary = null
-          if (response.data.includes('Update Success!')) {
-            this.info('Success', 'Successfully updated display', true)
-            this.waitForPromiseSuccess(this.getStats).then()
-          }
-          else {
-            this.error('Error', 'Failed to update display: ' + response.data)
-            this.waitForPromiseSuccess(this.abortUpdate)
-          }
-        }).catch(error => {
-          this.progress = -1;
-          this.error('Error', 'Failed to update display: ' + error)
-          this.waitForPromiseSuccess(this.abortUpdate)
         })
-      }).catch(error => {
+        this.progress = -1;
+        this.binary = null
+        if (response.data.includes('Update Success!')) {
+          this.info('Success', 'Successfully updated display', true)
+          this.waitForPromiseSuccess(this.getStats).then()
+        }
+        else {
+          this.error('Error', 'Failed to update display: ' + response.data)
+          await this.waitForPromiseSuccess(this.abortUpdate)
+        }
+      } catch (error) {
         this.error('Error', 'Failed to update display: ' + error)
-      })
-    },
-    retry() {
-      this.submit()
+        this.progress = -1;
+        console.error(error)
+        await this.waitForPromiseSuccess(this.abortUpdate)
+      }
     },
     onUploadProgress(event) {
       this.progress = Math.round((100 * event.loaded) / event.total)
@@ -132,8 +143,8 @@ export default {
       }
     }
   },
-  beforeRouteLeave(to, from, next) {
-    if (this.progress < 0 || window.confirm('Are you really sure you want to leave during an update? This might corrupt the display firmware.'))
+  async beforeRouteLeave(to, from, next) {
+    if (this.progress < 0 || await this.confirmAsync('Danger', 'Are you really sure you want to leave during an update? This might corrupt the display firmware.'))
       next()
     else
       next(false)

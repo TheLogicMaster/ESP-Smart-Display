@@ -2,8 +2,8 @@
   <div>
     <div class="display-panel">
       <md-button @click="presetDialog = true" class="md-raised md-accent">Load Preset</md-button>
-      <md-button @click="confirmReload" class="md-raised md-accent">Reload Configuration</md-button>
-      <md-button @click="confirmSave" class="md-raised md-accent">Save Configuration</md-button>
+      <md-button @click="reload" class="md-raised md-accent">Reload Configuration</md-button>
+      <md-button @click="save" class="md-raised md-accent">Save Configuration</md-button>
       <color-picker label="Background" class="color-picker" v-model="config.backgroundColor"></color-picker>
       <md-content class="display"
                   v-bind:style="{width: `${64 * pixelSize}px`, height: `${32 * pixelSize}px`, backgroundColor: cppHexToJs(config.backgroundColor)}">
@@ -55,7 +55,7 @@
       </md-field>
       <md-dialog-actions>
         <md-button class="md-accent md-raised" @click="presetDialog = false">Cancel</md-button>
-        <md-button class="md-accent md-raised" @click="confirmLoadPreset">Load Preset</md-button>
+        <md-button class="md-accent md-raised" @click="loadPreset">Load Preset</md-button>
       </md-dialog-actions>
     </md-dialog>
   </div>
@@ -90,14 +90,9 @@ export default {
     }
   }),
   methods: {
-    confirmLoadPreset() {
-      if (this.areObjectsEqual(this.$store.state.configuration, this.config))
-        this.loadPreset()
-      else
-        this.confirm(() => this.loadPreset(), () => {
-        }, 'Load Prefab', 'Are you sure you want to load a display preset? This will erase unsaved changes')
-    },
-    loadPreset() {
+    async loadPreset() {
+      if (!this.areObjectsEqual(this.$store.state.configuration, this.config) && !(await this.confirmAsync('Load Prefab', 'Are you sure you want to load a display preset? This will erase unsaved changes')))
+        return
       this.config.widgets.length = 0
 
       let widgets = []
@@ -224,14 +219,9 @@ export default {
       this.config.widgets.push(widget)
       this.addWidgetType = 0
     },
-    confirmReload() {
-      if (this.areObjectsEqual(this.$store.state.configuration, this.config))
-        this.reload().then()
-      else
-        this.confirm(() => this.reload().then(), () => {
-        }, 'Reload Config', 'Are you sure you want to reload the display configuration? This will erase unsaved changes')
-    },
     async reload() {
+      if (!this.areObjectsEqual(this.$store.state.configuration, this.config) && !(await this.confirmAsync('Reload Config', 'Are you sure you want to reload the display configuration? This will erase unsaved changes')))
+        return
       let result = await this.getConfig()
       if (result)
         this.setup()
@@ -241,11 +231,9 @@ export default {
     setup() {
       this.config = this.cloneObject(this.$store.state.configuration)
     },
-    confirmSave() {
-      this.confirm(() => this.save().then(), () => {
-      }, 'Save Config', 'Are you sure you want to save the display configuration? This will overwrite the current configuration.')
-    },
     async save() {
+      if (!(await this.confirmAsync('Save Config', 'Are you sure you want to save the display configuration? This will overwrite the current configuration.')))
+        return
       let result = await this.saveConfig(this.config)
       if (result)
         this.info('Success', 'Successfully updated display configuration')
@@ -261,13 +249,13 @@ export default {
     this.refreshImages(false).then()
     this.setup()
   },
-  beforeRouteLeave(to, from, next) {
+  async beforeRouteLeave(to, from, next) {
     if (this.areObjectsEqual(this.$store.state.configuration, this.config)) {
       next()
       return
     }
 
-    this.confirmUnsavedNavigation(next)
+    await this.confirmUnsavedNavigation(next)
   },
   beforeDestroy() {
     window.removeEventListener('beforeunload', this.onCloseAttempt)

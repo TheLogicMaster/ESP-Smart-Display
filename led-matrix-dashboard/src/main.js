@@ -163,7 +163,19 @@ Vue.mixin({
         timeout: 0
       })
     },
-    confirm(confirm, cancel, title, content) {
+    setBackdrop(show) {
+      store.commit('set', ['backdrop', show])
+    },
+    async confirmAsync(title, content) {
+      let finished = false
+      let confirmed = false
+      let finish = canceled => {
+        if (finished)
+          return
+        confirmed = !canceled
+        finished = true
+        this.setBackdrop(false)
+      }
       this.$snotify.confirm(content, title, {
         closeOnClick: false,
         position: SnotifyPosition.centerCenter,
@@ -171,25 +183,31 @@ Vue.mixin({
           {
             text: 'Cancel', action: (toast) => {
               this.$snotify.remove(toast.id);
-              cancel()
+              finish(true)
             }, bold: true
           },
           {
             text: 'Yes', action: (toast) => {
               this.$snotify.remove(toast.id);
-              confirm()
+              finish(false)
             }, bold: true
           }
         ]
-      }).on("mounted", () => store.commit('set', ['backdrop', true]))
-        .on("destroyed", () => store.commit('set', ['backdrop', false]))
-        .on("hidden", () => store.commit('set', ['backdrop', false]))
+      }).on("mounted", () => this.setBackdrop(true))
+        .on("destroyed", () => finish(true))
+        .on("hidden", () => finish(true))
+      while (!finished)
+        await this.sleep(1)
+      return confirmed
     },
-    confirmNavigation(next, title, content) {
-      this.confirm(() => next(), () => next(false), title, content)
+    async confirmNavigation(next, title, content) {
+      if(await this.confirmAsync(title, content))
+        next()
+      else
+        next(false)
     },
-    confirmUnsavedNavigation(next) {
-      this.confirmNavigation(next, 'Unsaved Changes', 'Are you sure you want to leave without saving?')
+    async confirmUnsavedNavigation(next) {
+      await this.confirmNavigation(next, 'Unsaved Changes', 'Are you sure you want to leave without saving?')
     },
     async waitForPromiseSuccess(promiseProvider, interval = 500, attempts = 0) {
       let count = 0

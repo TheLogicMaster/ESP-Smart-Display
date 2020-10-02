@@ -403,7 +403,7 @@ ADC_MODE(ADC_VCC);
 void writeDefaultConfig() {
     LittleFS.remove("/config.json");
     File file = LittleFS.open("/config.json", "w");
-    file.print(F("{\"widgets\":[{\"xOff\":17,\"yOff\":11,\"type\":4,\"transparent\":true,\"large\":true,\"content\":\"Hello\",\"colors\":[\"0x000000\"],\"width\":30,\"height\":8}],\"brightnessMode\":0,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":\"0x00FFFF\",\"timezone\":\"eastern\",\"metric\":false,\"weatherKey\":\"\",\"weatherLocation\":\"5014227\"}"));
+    file.print(F("{\"widgets\":[{\"xOff\":17,\"yOff\":11,\"type\":4,\"transparent\":false,\"font\":2,\"content\":\"Hello\",\"colors\":[\"0x000000\"],\"width\":30,\"height\":8,\"backgroundColor\":\"0x00FFFF\"}],\"brightnessMode\":0,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":\"0x00FFFF\",\"timezone\":\"eastern\",\"metric\":false,\"weatherKey\":\"\",\"weatherLocation\":\"5014227\"}"));
     file.close();
 }
 
