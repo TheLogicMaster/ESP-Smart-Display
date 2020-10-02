@@ -31,8 +31,8 @@ jobs:
     
       - name: Build PlatformIO Binaries
         run: |
-          platformio run -e nodemcuv2-32x64 -e d1-mini-32x64 -e d1-mini-lite-32x64
-          platformio run -e nodemcuv2-32x64 -e d1-mini-32x64 -e d1-mini-lite-32x64 -t buildfs
+          platformio run -e nodemcuv2-32x64 -e d1-mini-32x64
+          platformio run -e nodemcuv2-32x64 -e d1-mini-32x64 -t buildfs
           fallocate -l 1052688 empty.bin
           mv ./.pio/build/nodemcuv2-32x64/firmware.bin ./firmware-nodemcuv2-32x64-${{ steps.get_version.outputs.VERSION }}.bin
           mv ./.pio/build/d1-mini-32x64/firmware.bin ./firmware-d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin
