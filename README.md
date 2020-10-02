@@ -34,15 +34,23 @@ binaries are availible for D1 Mini and NodeMCU V2. The D1 Mini Lite has 1MB of f
 supported and features like HTTPS and built-in images are disabled.
 
 ## Installation
-The release binaries could be manually flashed using [esptool](https://github.com/espressif/esptool), but flashing the
-filesystem binary would require board specific parameters, which would be a hassle. Instead, use Platformio or Arduino
-IDE after downloading the latest [release](https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest).
+The full release binaries can be flashed using [esptool](https://github.com/espressif/esptool) or a GUI version. For 
+esptool's command line interface: 
+```shell script
+# Example command for NodeMCU V2
+esptool --port /dev/ttyUSB0 write_flash -fm dio 0x00000 nodemcuv2-32x64-v0.bin
+```
+Alternatively, you can use Platformio or Arduino
+IDE after downloading the latest [release](https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest) 
+source code.
 The flash memory split for the program and filesystem is 50/50 for a 4MB board, where 1MB is for the program, 1MB is for
 firmware OTA updates, and 2MB is for the LittleFS filesystem. For platformio, this means the `eagle.flash.4m2m.ld` ld
 script. For Arduino IDE, use the `4MB (FS: 2MB)` flashing option. For 1MB boards, Platformio is probably required, as it
 doesn't look like Arduino IDE has an option to not use flash for OTA. 
 
 ### Building the Web Dashboard
+Manually compiling the firmware and building the dashboard is only required if not flashing one of the pre-built full 
+binaries that contains both the firmware and dashboard.
 The dashboard is built and moved to the data directory by running the following scripts in the project directory. This
 must be done before uploading the filesystem image to the ESP8266.
 ```shell script

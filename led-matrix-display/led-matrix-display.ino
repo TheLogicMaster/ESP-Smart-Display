@@ -671,7 +671,16 @@ bool sendFile(String path, bool cache = true) {
 }
 
 void serveRoot() {
-    sendFile(F("/index.html"));
+    if (!sendFile(F("/index.html")))
+        server->send(200, F("text/html"), R"=====(
+  <!DOCTYPE html>
+  <html>
+  <body>
+  <strong>Dashboard is not installed</strong>
+  <a href="https://github.com/TheLogicMaster/ESP-LED-Matrix-Display">Get Dashboard</a>  
+  </body>
+  </html>
+)=====");
 }
 
 void serveConfig() {
