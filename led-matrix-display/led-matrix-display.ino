@@ -1037,12 +1037,12 @@ bool checkAlphaColors(std::vector<uint16_t> alphaColors, uint16_t color) {
 }
 
 void drawImage(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset,
-                    uint8_t *data, std::vector<uint16_t> alphaColors, bool uInt16) {
+                    uint8_t *data, std::vector<uint16_t> alphaColors, bool transparent, bool uInt16) {
     uint16_t line_buffer[width];
     for (uint8_t y = 0; y < height; y++) {
         memcpy_P(line_buffer, data + (offset * width * height + y * width) * 2, width * 2);
         for (uint8_t x = 0; x < width; x++) {
-            if (checkAlphaColors(alphaColors, line_buffer[x]))
+            if (transparent && checkAlphaColors(alphaColors, line_buffer[x]))
                 continue;
             d.drawPixel(xOffset + x, yOffset + y, line_buffer[x]);
         }
@@ -1052,7 +1052,7 @@ void drawImage(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width,
 }
 
 void drawImageFs(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset,
-                      const char name[], std::vector<uint16_t> alphaColors, File &file) {
+                      const char name[], std::vector<uint16_t> alphaColors, bool transparent, File &file) {
     if (!file) {
         if (!LittleFS.exists(name)) {
             Serial.print(F("Couldn't find image to draw for: "));
@@ -1073,7 +1073,7 @@ void drawImageFs(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t widt
         file.readBytes(line_buffer, width * 2);
         for (uint8_t x = 0; x < width; x++) {
             uint16_t color = line_buffer[x * 2] | line_buffer[x * 2 + 1] << 8;
-            if (checkAlphaColors(alphaColors, color))
+            if (transparent && checkAlphaColors(alphaColors, color))
                 continue;
             d.drawPixel(xOffset + x, yOffset + y, color);
         }
@@ -1083,7 +1083,7 @@ void drawImageFs(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t widt
 }
 
 void
-drawGimpImage(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, uint8_t height, std::vector<uint16_t> alphaColors, char *data) {
+drawGimpImage(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, uint8_t height, std::vector<uint16_t> alphaColors, bool transparent, char *data) {
     for (uint y = 0; y < height; y++) {
         for (uint x = 0; x < width; x++) {
             uint offset = (x + y * width) * 4;
@@ -1095,7 +1095,7 @@ drawGimpImage(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, 
             uint8_t g = ((((c1 - 33) & 0xF) << 4) | ((c2 - 33) >> 2));
             uint8_t b = ((((c2 - 33) & 0x3) << 6) | ((c3 - 33)));
             uint16_t color = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-            if (checkAlphaColors(alphaColors, color))
+            if (transparent && checkAlphaColors(alphaColors, color))
                 continue;
             display.drawPixel(x + xOff, y + yOff, color);
         }
@@ -1455,13 +1455,13 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
                                     widget.yOff + (widget.height - progmemImages[widget.content].height) / 2,
                                     progmemImages[widget.content].width, progmemImages[widget.content].height,
                                     widget.state + widget.offset, (uint8_t *) progmemImages[widget.content].data,
-                                    widget.colors, progmemImages[widget.content].type == IMAGE_UINT16);
+                                    widget.colors, widget.transparent, progmemImages[widget.content].type == IMAGE_UINT16);
                     break;
                 case IMAGE_GIMP:
                     drawGimpImage(d, widget.xOff + (widget.width - progmemImages[widget.content].width) / 2,
                                   widget.yOff + (widget.height - progmemImages[widget.content].height) / 2,
                                   progmemImages[widget.content].width, progmemImages[widget.content].height,
-                                  widget.colors, (char *) progmemImages[widget.content].data);
+                                  widget.colors, widget.transparent, (char *) progmemImages[widget.content].data);
                     break;
                 default:
                     Serial.println(F("Unknown image type"));
@@ -1470,7 +1470,7 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
             break;
         case WIDGET_FS_IMAGE:
             drawImageFs(d, widget.xOff, widget.yOff, widget.width, widget.height, widget.state + widget.offset,
-                             ("/images/" + widget.content).c_str(), widget.colors, widget.file);
+                             ("/images/" + widget.content).c_str(), widget.colors, widget.transparent, widget.file);
             break;
         case WIDGET_ANALOG_CLOCK:
             drawAnalogClock(d, widget.xOff + widget.height / 2, widget.yOff + widget.height / 2,
