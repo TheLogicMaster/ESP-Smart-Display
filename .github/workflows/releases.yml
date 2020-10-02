@@ -36,9 +36,8 @@ jobs:
           mv ./.pio/build/nodemcuv2-32x64/firmware.bin ./firmware-nodemcuv2-32x64-${{ steps.get_version.outputs.VERSION }}.bin
           mv ./.pio/build/d1-mini-32x64/firmware.bin ./firmware-d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin
           mv ./.pio/build/nodemcuv2-32x64/littlefs.bin ./fs-4m-${{ steps.get_version.outputs.VERSION }}.bin
-          ./combine-binaries.sh firmware-nodemcuv2-32x64-${{ steps.get_version.outputs.VERSION }}.bin empty.bin fs-4m-${{ steps.get_version.outputs.VERSION }}.bin ./nodemcuv2-32x64-${{ steps.get_version.outputs.VERSION }}.bin
-          ./combine-binaries.sh firmware-d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin empty.bin fs-4m-${{ steps.get_version.outputs.VERSION }}.bin d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin
-          ls
+          ./combine-binaries.sh firmware-nodemcuv2-32x64-${{ steps.get_version.outputs.VERSION }}.bin fs-4m-${{ steps.get_version.outputs.VERSION }}.bin ./nodemcuv2-32x64-${{ steps.get_version.outputs.VERSION }}.bin
+          ./combine-binaries.sh firmware-d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin fs-4m-${{ steps.get_version.outputs.VERSION }}.bin d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin
           
       - name: Create Release
         id: create_release
