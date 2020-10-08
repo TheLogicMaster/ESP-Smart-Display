@@ -69,6 +69,9 @@
 #ifndef USE_OTA_UPDATING
 #define USE_OTA_UPDATING true // Disable to save space if OTA updating isn't needed
 #endif
+#ifndef USE_NTP
+#define USE_NTP true // Disable to save space if OTA updating isn't needed
+#endif
 #ifndef USE_HTTPS
 #define USE_HTTPS true // Disable if only http GET requests are needed space
 #endif
@@ -115,14 +118,34 @@
 #pragma endregion
 
 // Source files
+#ifdef ESP32 // ESP32 Specific
+#include <esp_wifi.h>
+#include <LITTLEFS.h>
+#define LittleFS LITTLEFS
+#define Dir File
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WiFiMulti.h>
+//#include <WiFiClientSecure.h>
+#include <WebServer.h>
+//#define sint16_t signed short
+//#define sint32_t signed long
+//#define ESP8266WebServer WebServer
+#else // ESP8266 Specific
 #include <LittleFS.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#endif
+
+// Common Libraries
 #include <ArduinoJson.h>
 #include <ESP_DoubleResetDetector.h>
-#include <ESP8266WiFi.h>
 #include <DNSServer.h>
-#include <ESP8266WebServer.h>
-#include <WiFiManager.h>
+#include <ESP_WiFiManager.h>
+//#include <WiFiManager.h>
+#if USE_NTP
 #include <NTPClient.h>
+#endif
 #include <TimeLib.h>
 #include <map>
 #if USE_WEATHER
@@ -180,17 +203,17 @@ std::map<std::string, Timezone *> timezones = {{"eastern",  &Eastern},
 
 #include <PxMatrix.h>
 
-#if defined(ESP32)
+#ifdef ESP32
 #define P_LAT 22
 #define P_A 19
 #define P_B 23
 #define P_C 18
 #define P_D 5
 #define P_E 15
-#define P_OE 2
+#define P_OE 26 // Use 26 instead of 2 since pin isn't broken out on NodeMCU 32s
 hw_timer_t * timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
-#elif defined(ESP8266)
+#else
 #include <Ticker.h>
 Ticker display_ticker;
 #define P_LAT D0
@@ -204,13 +227,13 @@ Ticker display_ticker;
 
 PxMATRIX display(DISPLAY_WIDTH, DISPLAY_HEIGHT, P_LAT, P_OE, P_A, P_B, P_C, P_D, P_E);
 
-#if defined(ESP8266)
+#ifdef ESP8266
 // ISR for display refresh
 void display_updater() {
   //display.displayTestPattern(70);
   display.display(70);
 }
-#elif defined(ESP32)
+#else
 void IRAM_ATTR display_updater() {
   // Increment the counter and set the time of ISR
   portENTER_CRITICAL_ISR(&timerMux);
@@ -384,11 +407,18 @@ RunningAverage brightnessAverage(BRIGHTNESS_ROLLING_AVG_SIZE);
 #endif
 
 DoubleResetDetector drd(10, 0);
+#ifdef ESP32
+WebServer *server;
+#else
 ESP8266WebServer *server;
+#endif
+
 #if USE_OTA_UPDATING
 ESP8266HTTPUpdateServer updateServer(true);
 #endif
+#if USE_NTP
 NTPClient *ntpClient;
+#endif
 #if USE_WEATHER
 OpenWeatherMapForecast weatherClient;
 #endif
@@ -422,7 +452,7 @@ uint16_t parseHexColorString(std::string s) {
 bool parseConfig(char data[], String& errorString) {
     Serial.print(F("Attempting to parse config: "));
     Serial.println(data);
-    
+
     DynamicJsonDocument doc(CONFIG_JSON_BUFFER_SIZE);
     DeserializationError error = deserializeJson(doc, data);
     if (error) {
@@ -576,7 +606,9 @@ bool parseConfig(char data[], String& errorString) {
     sunMoonTime = 0;
 
     Serial.println(F("Successfully loaded configuration!"));
+#ifdef ESP8266
     Serial.printf("Memory Free: %i, Fragmentation: %i%%\n", ESP.getFreeHeap(), ESP.getHeapFragmentation());
+#endif
     return true;
 }
 
@@ -620,7 +652,7 @@ void queueFullUpdate() {
 
 #pragma region Web Server
 
-void onStartAccessPoint(WiFiManager *WiFiManager) {
+void onStartAccessPoint(ESP_WiFiManager *wiFiManager) {
     Serial.println(F("Entering AP config mode"));
     display.setCursor(0, 0);
     display.println(F("Wifi"));
@@ -642,7 +674,7 @@ String getContentType(String filename) {
 int getHeaderCacheVersion() {
     if (!server->hasHeader(F("If-None-Match")))
         return -1;
-    for (int i = 0; i < server->headers(); i++ ) 
+    for (int i = 0; i < server->headers(); i++ )
         if (server->headerName(i).equals(F("If-None-Match")))
             return server->header(i).toInt();
     return -1;
@@ -660,7 +692,7 @@ bool sendFile(String path, bool cache = true) {
                 return true;
             }
             server->sendHeader(F("ETag"), String(dashboardVersion, 10));
-            server->sendHeader(F("Cache-Control"), F("no-cache")); 
+            server->sendHeader(F("Cache-Control"), F("no-cache"));
         }
         File file = LittleFS.open(existpath, "r");
         server->streamFile(file, contentType);
@@ -677,7 +709,7 @@ void serveRoot() {
   <html>
   <body>
   <strong>Dashboard is not installed</strong>
-  <a href="https://github.com/TheLogicMaster/ESP-LED-Matrix-Display">Get Dashboard</a>  
+  <a href="https://github.com/TheLogicMaster/ESP-LED-Matrix-Display">Get Dashboard</a>
   </body>
   </html>
 )=====");
@@ -710,7 +742,7 @@ void serveConfig() {
         if (parseConfig(buf.get(), error)) {
             LittleFS.remove("/config.json");
             File file = LittleFS.open("/config.json", "w");
-            file.write(jsonString.c_str());
+            file.print(jsonString.c_str());
             file.close();
             Serial.println(F("Successfully updated config file"));
             server->send(200);
@@ -757,23 +789,27 @@ void abortOTA() {
 
 void serveStats() {
     StaticJsonDocument<400> doc;
+#if USE_NTP
     doc["uptime"] = ntpClient->getRawTime() - bootTime;
+#endif
     char reason[25];
-    doc["resetReason"] = strcpy(reason, ESP.getResetReason().c_str());
     doc["version"] = VERSION_CODE;
+#ifdef ESP8266
+    doc["resetReason"] = strcpy(reason, ESP.getResetReason().c_str());
     doc["fragmentation"] = ESP.getHeapFragmentation();
     doc["memoryFree"] = ESP.getFreeHeap();
-    doc["transparencyBuffer"] = displayBuffer.isAllocated();
     FSInfo info;
     LittleFS.info(info);
-    doc["platform"] = BOARD_NAME;
     doc["filesystemUsed"] = info.usedBytes;
     doc["filesystemTotal"] = info.totalBytes;
     doc["maxOpenFiles"] = info.maxOpenFiles;
     doc["maxPathLength"] = info.maxPathLength;
+    doc["vcc"] = ESP.getVcc();
+#endif
+    doc["transparencyBuffer"] = displayBuffer.isAllocated();
+    doc["platform"] = BOARD_NAME;
     doc["width"] = DISPLAY_WIDTH;
     doc["height"] = DISPLAY_HEIGHT;
-    doc["vcc"] = ESP.getVcc();
     doc["brightness"] = currentBrightness;
     doc["brightnessSensor"] = analogRead(BRIGHTNESS_SENSOR_PIN);
     std::unique_ptr<char[]> buf(new char[350]);
@@ -783,7 +819,7 @@ void serveStats() {
 
 void writeDefaultImageData() {
     File dataFile = LittleFS.open(F("/imageData.json"), "w");
-    dataFile.write("{}");
+    dataFile.print("{}");
     dataFile.close();
 }
 
@@ -833,14 +869,18 @@ void writeFSImageData(std::map <std::string, FSImage> data) {
     }
     std::unique_ptr<char[]> buf(new char[MAX_IMAGE_DATA_FILE_SIZE]);
     serializeJson(doc, buf.get(), MAX_IMAGE_DATA_FILE_SIZE);
-    dataFile.write(buf.get());
+    dataFile.print(buf.get());
     dataFile.close();
 }
 
 Dir getImageDir() {
     if (!LittleFS.exists("/images"))
         LittleFS.mkdir("/images");
+#ifdef ESP32
+    return LittleFS.open("/images");
+#else
     return LittleFS.openDir("/images");
+#endif
 }
 
 void serveImageData() {
@@ -970,6 +1010,7 @@ void deleteAllImages() {
     Dir dir = getImageDir();
     LittleFS.rmdir(F("/images"));
     LittleFS.mkdir(F("/images"));
+#ifdef ESP8266
     std::vector <String> files;
     while (dir.next()) {
         Serial.println(dir.fileName().c_str());
@@ -977,6 +1018,7 @@ void deleteAllImages() {
     }
     for (const auto &file: files)
         LittleFS.remove("/images/" + file);
+#endif
 }
 
 void serveDeleteAllImages() {
@@ -995,14 +1037,18 @@ void serveFactoryReset() {
     writeDefaultConfig();
     deleteAllImages();
     server->send(200);
-    WiFiManager wifiManager;
+    ESP_WiFiManager wifiManager;
     wifiManager.resetSettings();
     delay(2000);
     ESP.restart();
 }
 
 void setupWebserver() {
+#if ESP32
+    server = new WebServer(80);
+#else
     server = new ESP8266WebServer(80);
+#endif
     server->on(F("/"), serveRoot);
     #if USE_OTA_UPDATING
     updateServer.setup(server);
@@ -1152,6 +1198,11 @@ void drawText(Adafruit_GFX &d, const char *text, uint8_t xOffset, uint8_t yOffse
     d.print(text);
 }
 
+void drawTinyText(Adafruit_GFX &display, const char text[], uint8_t x, uint8_t y, uint8_t width, uint8_t height,
+                  uint16_t color, bool transparent, uint16_t backgroundColor, uint8_t wrapping) {
+    TFDrawText(display, text, x, y, color, transparent, backgroundColor);
+}
+
 void drawTextWidget(Adafruit_GFX &d, Widget &widget) {
     if (widget.font >= FONT_GFX)
                 drawText(d, widget.content.c_str(),
@@ -1177,11 +1228,6 @@ void drawTextWidget(Adafruit_GFX &d, Widget &widget) {
 #endif
 }
 
-void drawTinyText(Adafruit_GFX &display, const char text[], uint8_t x, uint8_t y, uint8_t width, uint8_t height,
-                  uint16_t color, bool transparent, uint16_t backgroundColor, uint8_t wrapping) {
-    TFDrawText(display, text, x, y, color, transparent, backgroundColor);
-}
-
 bool sendGetRequest(std::string url, std::string auth, uint16_t timeout, bool json, std::string &result) {
     if (!String(url.c_str()).startsWith(F("http"))) {
         Serial.println("Invalid GET protocol");
@@ -1194,11 +1240,11 @@ bool sendGetRequest(std::string url, std::string auth, uint16_t timeout, bool js
     std::string hostPort = address.substr(0, addressEnd);
     uint hostEnd = address.find_first_of(':');
     std::string host = hostPort.substr(0, hostEnd);
-    if (hostEnd < hostPort.length()) 
+    if (hostEnd < hostPort.length())
         port = strtoul(hostPort.substr(hostEnd + 1).c_str(), NULL, 10);
 
     std::unique_ptr<WiFiClient> clientPtr;
-    
+
     if (DELETE_TRANSPARENCY_BUFFER_ON_HTTPS && ssl)
         displayBuffer.close();
 
@@ -1211,10 +1257,12 @@ bool sendGetRequest(std::string url, std::string auth, uint16_t timeout, bool js
 #endif
     WiFiClient* client = clientPtr.get();
     if (ssl) {
+        // Impossible to send requests without limiting buffer sizes, though this may cause issues receiving responses if server doesn't support MFLN
+#ifdef ESP8266
         WiFiClientSecure* secureClient = (WiFiClientSecure*)client;
         secureClient->setInsecure();
-        // Impossible to send requests without limiting buffer sizes, though this may cause issues receiving responses if server doesn't support MFLN
         secureClient->setBufferSizes(HTTPS_RECEIVE_BUFFER, HTTPS_TRANSMIT_BUFFER);
+#endif
     }
     client->flush();
     client->setTimeout(timeout);
@@ -1306,7 +1354,7 @@ void updateTextGETWidgetJson(Widget &widget) {
     std::string data;
     if (!sendGetRequest(widget.source, widget.auth, widget.length, true, data))
         return;
-    
+
     DynamicJsonDocument doc(JSON_REQUEST_BUFFER_SIZE);
     DeserializationError error = deserializeJson(doc, data);
     if (error) {
@@ -1373,7 +1421,7 @@ void updateClockWidget(Widget &widget) {
         widget.state = theMinute;
         widget.dirty = true;
         widget.finished = false;
-        if (widget.type != WIDGET_ANALOG_CLOCK) 
+        if (widget.type != WIDGET_ANALOG_CLOCK)
             widget.content = getTimeText(widget.contentType).c_str();
     }
 
@@ -1397,7 +1445,7 @@ void updateClockWidget(Widget &widget) {
                 widget.dirty = true;
         }
     }
-#endif   
+#endif
 }
 
 void updateWidget(Widget &widget) {
@@ -1450,9 +1498,9 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
                          widget.backgroundColor);
         else
             d.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.backgroundColor);
-    } else if (!buffering) 
+    } else if (!buffering)
         displayBuffer.write(display, widget.xOff, widget.yOff, widget.width, widget.height);
-    
+
 
     // Todo: check if background widgets change to queue a full update on the next frame
     switch (widget.type) {
@@ -1632,7 +1680,9 @@ void updateSunMoon() {
 }
 
 void updateTime() {
+#if USE_NTP
     ntpClient->update();
+#endif
     theHour12 = hourFormat12();
     theHour = hour();
     theMinute = minute();
@@ -1701,16 +1751,20 @@ void setup() {
     display.showBuffer();
     display.fillScreen(GREEN);
 
-    LittleFS.begin();
+    if (!LittleFS.begin()) {
+        display.fillScreen(BLUE);
+        display.print("FS ERROR");
+        Serial.println("Failed to open filesystem");
+    }
     File versionFile = LittleFS.open("/version.txt", "r");
     if (versionFile) {
         dashboardVersion = versionFile.parseInt();
-       versionFile.close(); 
+       versionFile.close();
     }
     else
         Serial.println(F("Failed to read version file."));
 
-    WiFiManager wifiManager;
+    ESP_WiFiManager wifiManager;
     wifiManager.setAPCallback(onStartAccessPoint);
 
     if (drd.detectDoubleReset()) {
@@ -1740,10 +1794,12 @@ void setup() {
     //writeDefaultConfig();
     //LittleFS.remove("/config.json");
 
+#if USE_NTP
     ntpClient = new NTPClient("time.nist.gov", 0, NTP_UPDATE_INTERVAL);
     ntpClient->begin();
     ntpClient->forceUpdate();
     bootTime = ntpClient->getRawTime();
+#endif
 
     if (needsConfig || !getConfig()) {
         display.fillScreen(BLUE);
@@ -1762,8 +1818,10 @@ void setup() {
 
     display.setTextWrap(false);
 
+#if USE_NTP
     setSyncProvider([]() { return timezones[localTimezone]->toLocal(ntpClient->getRawTime()); });
     setSyncInterval(10);
+#endif
 }
 
 void loop() {
