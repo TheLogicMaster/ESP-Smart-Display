@@ -66,9 +66,6 @@
 #ifndef USE_SUNRISE
 #define USE_SUNRISE true // Disable to save space if Subrise brightness mode isn't needed
 #endif
-#ifndef USE_OTA_UPDATING
-#define USE_OTA_UPDATING true // Disable to save space if OTA updating isn't needed
-#endif
 #ifndef USE_NTP
 #define USE_NTP true // Disable to save space if OTA updating isn't needed
 #endif
@@ -122,10 +119,14 @@
 
 // Source files
 #ifdef ESP32 // ESP32 Specific
-#include <ESPAsyncTCP.h>
+#include <Update.h>
+#include <AsyncTCP.h>
 #include <esp_wifi.h>
-#include <LITTLEFS.h>
-#define LittleFS LITTLEFS
+#include <FS.h>
+#include <SPIFFS.h>
+//#include <LITTLEFS.h>
+//#define LittleFS LITTLEFS
+#define LittleFS SPIFFS
 #define Dir File
 #include <WiFi.h>
 #include <WiFiClient.h>
@@ -1059,13 +1060,19 @@ void serveOTA(AsyncWebServerRequest *request) {
 
 void serveOTAUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
     if (!index) {
+#ifdef ESP8266
         Update.runAsync(true);
+#endif
         if (filename.equals("firmware")) {
             if(!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000))
                 Update.printError(Serial);
         } else {
             LittleFS.end();
+#ifdef ESP8266
             if (!Update.begin((size_t) &_FS_end - (size_t) &_FS_start, U_FS))
+#else
+            if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH))
+#endif
                 Update.printError(Serial);
         }
     }
@@ -1463,7 +1470,7 @@ void updateClockWidget(Widget &widget) {
 
 #if USE_TETRIS
     if (widget.font == FONT_TETRIS) {
-        ensureTetrisAllocated(widget.tetris);
+        ensureTetrisAllocated(widget);
         if (widget.tetris) {
             if (!widget.finished)
                 widget.dirty = true;

@@ -25,7 +25,7 @@ is provided in place of the normal display API calls. Aside from configuration a
 be fully functional.
 
 ## Hardware
-Currently, only ESP8266 is supported, but ESP32 support is planned. 4MB of RAM is required to use both the web dashboard
+Currently, only ESP8266 is fully supported, but ESP32 support is in progress. 4MB of RAM is required to use both the web dashboard
 and OTA updates. This was developed primarily on a P3 32x64 panel, but other sizes should be supported. Wiring is required to
 be like [this](https://www.instructables.com/id/Morphing-Digital-Clock/). A photoresistor/resistor is supported on pin 
 A0 in [this](https://www.instructables.com/id/NodeMCU-With-LDR/) configuration to control the display brightness. There 
@@ -65,11 +65,13 @@ must be done before uploading the filesystem image to the ESP8266.
 To use Arduino IDE, the following libraries must be installed through the library manager:
 * PxMatrix
 * Adafruit GFX Library
-* WifiManager
 * ESP_DoubleResetDetector
+* [ESPAsyncWiFiManager]() (Manually install)
+* [AsyncTCP]() (Manually install)
+* [ESP Async WebServer]() (Manually install)
 * ArduinoJson
 * Time
-* WeatherStation (And dependencies)
+* WeatherStation (And dependencies if using ESP8266 and Weather)
 * Timezone
 * RunningAverage (If using brightness sensor "rolling" average)
 * TetrisAnimation (If using Tetris font)
@@ -78,7 +80,11 @@ The ESP8266 board support must be installed from
 [here](https://github.com/esp8266/Arduino#installing-with-boards-manager).
 The [ESP8266 FS plugin](https://github.com/earlephilhower/arduino-esp8266littlefs-plugin)
 is also needed to upload the web interface. Select the correct board and flash split for your board. First upload the
-code to the board, then select *FS Data Upload* under *Tools*.
+code to the board, then select *FS Data Upload* under *Tools*. 
+
+Due to Platformio compilation issue when using .INO files directly, the *main.cpp* must be renamed to *led-matrix-display.ino*
+before opening the project in Arduino IDE. All board specific definitions in *platformio.ini* must be changed in the new .INO file
+if your board isn't a NodeMCU V2.
 
 ### Platformio
 To use [Platformio](https://docs.platformio.org/), install it and configure platformio.ini to suit the display size and
