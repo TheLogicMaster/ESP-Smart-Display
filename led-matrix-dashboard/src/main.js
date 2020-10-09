@@ -707,7 +707,7 @@ Vue.mixin({
       if (Vue.prototype.$demoMode)
         return true
       try {
-        await axios.post('/config', this.cleanConfig(this.cloneObject(config)), {timeout: 10000})
+        await axios.post('/config', this.cleanConfig(this.cloneObject(config)), {timeout: 10000, headers: {'Content-Type': 'application/json'}})
         store.commit('set', ['configuration', this.cloneObject(config)])
         return true
       } catch (error) {
@@ -722,7 +722,7 @@ Vue.prototype.$axios = axios
 
 let address = window.location.protocol + '//' + window.location.hostname + window.location.pathname + (window.location.port === '' ? '' : ':' + window.location.port)
 if (address.includes(':8080'))
-  address = 'http://10.0.0.62:80'
+  address = 'http://10.0.0.139:80'
 axios.defaults.baseURL = address
 
 Vue.filter('capitalize', function (value) {

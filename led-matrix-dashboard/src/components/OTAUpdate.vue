@@ -107,8 +107,9 @@ export default {
 
       try {
         await this.$axios.post('/beginUpdate')
+        await this.sleep(1000)
         let form = new FormData()
-        form.append(this.selected, binary)
+        form.append(this.selected, binary, this.selected)
         this.progress = 0
         let response = await this.$axios.post('/update', form, {
           headers: {
@@ -118,7 +119,7 @@ export default {
         })
         this.progress = -1;
         this.binary = null
-        if (response.data.includes('Update Success!')) {
+        if (response.data.includes('OK')) {
           this.info('Success', 'Successfully updated display', true)
           this.waitForPromiseSuccess(this.getStats).then()
         }

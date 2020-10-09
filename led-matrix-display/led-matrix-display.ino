@@ -106,6 +106,9 @@
 #ifndef DISPLAY_PANELS
 #define DISPLAY_PANELS 1 // The number of total panels being horizontally chained
 #endif
+#ifndef DISPLAY_ROW_PATTERN
+#define DISPLAY_ROW_PATTERN 16 // The row pattern for the display
+#endif
 #if ENABLE_ARDUINO_OTA
 #include <ArduinoOTA.h>
 #endif
@@ -119,6 +122,7 @@
 
 // Source files
 #ifdef ESP32 // ESP32 Specific
+#include <ESPAsyncTCP.h>
 #include <esp_wifi.h>
 #include <LITTLEFS.h>
 #define LittleFS LITTLEFS
@@ -127,22 +131,22 @@
 #include <WiFiClient.h>
 #include <WiFiMulti.h>
 //#include <WiFiClientSecure.h>
-#include <WebServer.h>
 //#define sint16_t signed short
 //#define sint32_t signed long
-//#define ESP8266WebServer WebServer
 #else // ESP8266 Specific
+#include <ESPAsyncTCP.h>
 #include <LittleFS.h>
 #include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
 #endif
 
 // Common Libraries
+#include <AsyncJson.h>
+#include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <ESP_DoubleResetDetector.h>
 #include <DNSServer.h>
-#include <ESP_WiFiManager.h>
-//#include <WiFiManager.h>
+//#include <ESP_WiFiManager.h>
+#include <ESPAsyncWiFiManager.h>
 #if USE_NTP
 #include <NTPClient.h>
 #endif
@@ -154,10 +158,6 @@
 #include "TinyIcons.h"
 #endif
 #include <Timezone.h>
-//#include <ESP8266HTTPClient.h>
-#if USE_OTA_UPDATING
-#include <ESP8266HTTPUpdateServer.h>
-#endif
 #if USE_SUNRISE
 #include <SunMoonCalc.h>
 #endif
@@ -211,6 +211,7 @@ std::map<std::string, Timezone *> timezones = {{"eastern",  &Eastern},
 #define P_D 5
 #define P_E 15
 #define P_OE 26 // Use 26 instead of 2 since pin isn't broken out on NodeMCU 32s
+TaskHandle_t displayUpdateTaskHandle = NULL;
 hw_timer_t * timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 #else
@@ -234,13 +235,28 @@ void display_updater() {
   display.display(70);
 }
 #else
-void IRAM_ATTR display_updater() {
-  // Increment the counter and set the time of ISR
+void IRAM_ATTR display_updater(){
   portENTER_CRITICAL_ISR(&timerMux);
-  //isplay.display(70);
-  display.displayTestPattern(70);
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  //notify task to unblock it 
+  vTaskNotifyGiveFromISR(displayUpdateTaskHandle, &xHigherPriorityTaskWoken );
+
+  //display task will be unblocked
+  if(xHigherPriorityTaskWoken){
+    //force context switch
+    portYIELD_FROM_ISR( );
+  }
   portEXIT_CRITICAL_ISR(&timerMux);
 }
+ 
+void displayUpdateTask(void *) {
+  for(;;){
+    //block here untill timer ISR unblocks task
+    if (ulTaskNotifyTake( pdTRUE, portMAX_DELAY))
+        display.display(70);
+  }
+}
+
 #endif
 #pragma endregion
 
@@ -386,6 +402,7 @@ time_t weatherUpdateTime;
 uint16_t weatherID = 200;
 bool needsConfig; // If a configuration is needed
 bool needsUpdate; // If a full update is needed
+bool needsRestart; // If a system reboot is needed
 uint8_t theHour12;
 uint8_t theHour;
 uint8_t theMinute;
@@ -407,15 +424,9 @@ RunningAverage brightnessAverage(BRIGHTNESS_ROLLING_AVG_SIZE);
 #endif
 
 DoubleResetDetector drd(10, 0);
-#ifdef ESP32
-WebServer *server;
-#else
-ESP8266WebServer *server;
-#endif
+AsyncWebServer server(80);
+DNSServer dnsServer;
 
-#if USE_OTA_UPDATING
-ESP8266HTTPUpdateServer updateServer(true);
-#endif
 #if USE_NTP
 NTPClient *ntpClient;
 #endif
@@ -449,56 +460,54 @@ uint16_t parseHexColorString(std::string s) {
                             strtoul(s.substr(offset + 4, 2).c_str(), NULL, 16));
 }
 
-bool parseConfig(char data[], String& errorString) {
-    Serial.print(F("Attempting to parse config: "));
-    Serial.println(data);
+void closeFiles() {
+    for (uint i = 0; i < widgets.size(); i++)
+        widgets[i].file.close();
+}
 
-    DynamicJsonDocument doc(CONFIG_JSON_BUFFER_SIZE);
-    DeserializationError error = deserializeJson(doc, data);
-    if (error) {
-        errorString.concat(F("Failed to deserialize config file: "));
-        errorString.concat(error.c_str());
+bool parseConfig(JsonVariant& json, String& errorString) {
+    if (!json) {
+        errorString.concat("Invalid Config");
         return false;
     }
-
-    uint16_t tempBackgroundColor = doc["backgroundColor"].isNull() ? 0 : parseHexColorString(
-            doc["backgroundColor"].as<char *>());
-    String tempWeatherKey = doc["weatherKey"].isNull() ? "" : String(doc["weatherKey"].as<char *>());
-    String tempWeatherLocation = doc["weatherLocation"].isNull() ? "" : String(
-            doc["weatherLocation"].as<char *>());
-    bool tempMetric = doc["metric"];
+    uint16_t tempBackgroundColor = json["backgroundColor"].isNull() ? 0 : parseHexColorString(
+            json["backgroundColor"].as<char *>());
+    String tempWeatherKey = json["weatherKey"].isNull() ? "" : String(json["weatherKey"].as<char *>());
+    String tempWeatherLocation = json["weatherLocation"].isNull() ? "" : String(
+            json["weatherLocation"].as<char *>());
+    bool tempMetric = json["metric"];
     bool tempTransparency = false;
-    bool tempFastUpdate = doc["fastUpdate"];
-    std::string tempTimezone = doc["timezone"].isNull() ? "eastern" : std::string(doc["timezone"].as<char *>());
+    bool tempFastUpdate = json["fastUpdate"];
+    std::string tempTimezone = json["timezone"].isNull() ? "eastern" : std::string(json["timezone"].as<char *>());
     if (timezones.count(tempTimezone) == 0) {
         errorString.concat(F("Invalid timezone"));
         return false;
     }
-    uint8_t tempBrightnessMode = doc["brightnessMode"];
+    uint8_t tempBrightnessMode = json["brightnessMode"];
     bool tempUsingSunMoon = tempBrightnessMode == BRIGHTNESS_SUN;
-    uint8_t tempBrightnessDim = doc["brightnessLower"];
-    uint8_t tempBrightnessBright = doc["brightnessUpper"].isNull() ? 255 : doc["brightnessUpper"];
-    uint16_t tempBrightnessSensorBright = doc["sensorBright"];
-    uint16_t tempBrightnessSensorDark = doc["sensorDark"];
+    uint8_t tempBrightnessDim = json["brightnessLower"];
+    uint8_t tempBrightnessBright = json["brightnessUpper"].isNull() ? 255 : json["brightnessUpper"];
+    uint16_t tempBrightnessSensorBright = json["sensorBright"];
+    uint16_t tempBrightnessSensorDark = json["sensorDark"];
     uint8_t tempBrightnessBrightMin;
     uint8_t tempBrightnessBrightHour;
     uint8_t tempBrightnessDimMin;
     uint8_t tempBrightnessDimHour;
-    String brightTime = doc["brightTime"].isNull() ? "09:30" : String(doc["brightTime"].as<char*>());
+    String brightTime = json["brightTime"].isNull() ? "09:30" : String(json["brightTime"].as<char*>());
     tempBrightnessBrightHour = brightTime.substring(0, 2).toInt();
     tempBrightnessBrightMin = brightTime.substring(3, 5).toInt();
-    String darkTime = doc["darkTime"].isNull() ? "20:30" : String(doc["darkTime"].as<char*>());
+    String darkTime = json["darkTime"].isNull() ? "20:30" : String(json["darkTime"].as<char*>());
     tempBrightnessDimHour = darkTime.substring(0, 2).toInt();
     tempBrightnessDimMin = darkTime.substring(3, 5).toInt();
-    double tempLongitude = doc["longitude"];
-    double tempLattitude = doc["lattitude"];
-    uint8_t tempScanPattern = doc["scanPattern"];
-    uint8_t tempMuxPattern = doc["muxPattern"];
-    uint8_t tempMuxDelay = doc["muxDelay"];
+    double tempLongitude = json["longitude"];
+    double tempLattitude = json["lattitude"];
+    uint8_t tempScanPattern = json["scanPattern"];
+    uint8_t tempMuxPattern = json["muxPattern"];
+    uint8_t tempMuxDelay = json["muxDelay"];
 
     bool tempUsingWeather = false;
     std::vector <Widget> tempWidgets;
-    JsonArray configWidgets = doc["widgets"];
+    JsonArray configWidgets = json["widgets"];
     if (configWidgets) {
         for (ushort i = 0; i < configWidgets.size(); i++) {
             JsonObject widget = configWidgets[i];
@@ -629,13 +638,18 @@ bool getConfig() {
         return false;
     }
 
-    std::unique_ptr<char[]> buf(new char[size]);
-
-    configFile.readBytes(buf.get(), size);
+    DynamicJsonDocument doc(CONFIG_JSON_BUFFER_SIZE);
+    DeserializationError deserializeError = deserializeJson(doc, configFile);
     configFile.close();
-
+    if (deserializeError) {
+        Serial.printf("Failed to parse config: %s\n, replacing with default...\n", deserializeError.c_str());
+        writeDefaultConfig();
+        return false;
+    }
+    
     String error;
-    if (!parseConfig(buf.get(), error)) {
+    JsonVariant json = doc.as<JsonVariant>();
+    if (!parseConfig(json, error)) {
         Serial.printf("Failed to parse config: %s\n, replacing with default...\n", error.c_str());
         writeDefaultConfig();
         return false;
@@ -646,13 +660,16 @@ bool getConfig() {
 
 #pragma endregion
 
-void queueFullUpdate() {
-    needsUpdate = true;
-}
 
 #pragma region Web Server
 
-void onStartAccessPoint(ESP_WiFiManager *wiFiManager) {
+void closeConnection(AsyncWebServerRequest *request) {
+    AsyncWebServerResponse *response = request->beginResponse(200);
+    response->addHeader("Connection", "close");
+    request->send(response);
+}
+
+void onStartAccessPoint(AsyncWiFiManager *wiFiManager) {
     Serial.println(F("Entering AP config mode"));
     display.setCursor(0, 0);
     display.println(F("Wifi"));
@@ -663,48 +680,49 @@ void onStartAccessPoint(ESP_WiFiManager *wiFiManager) {
 }
 
 String getContentType(String filename) {
-    if (filename.endsWith(F(".html"))) return F("text/html");
-    else if (filename.endsWith(F(".css"))) return F("text/css");
-    else if (filename.endsWith(F(".js"))) return F("application/javascript");
-    else if (filename.endsWith(F(".ico"))) return F("image/x-icon");
-    else if (filename.endsWith(F(".json"))) return F("text/json");
+    if (filename.endsWith(F(".html"))) 
+        return F("text/html");
+    else if (filename.endsWith(F(".css"))) 
+        return F("text/css");
+    else if (filename.endsWith(F(".js"))) 
+        return F("application/javascript");
+    else if (filename.endsWith(F(".ico"))) 
+        return F("image/x-icon");
+    else if (filename.endsWith(F(".json"))) 
+        return F("text/json");
     return F("text/plain");
 }
 
-int getHeaderCacheVersion() {
-    if (!server->hasHeader(F("If-None-Match")))
+int getHeaderCacheVersion(AsyncWebServerRequest *request) {
+    if (!request->hasHeader(F("If-None-Match")))
         return -1;
-    for (int i = 0; i < server->headers(); i++ )
-        if (server->headerName(i).equals(F("If-None-Match")))
-            return server->header(i).toInt();
+    for (int i = 0; i < request->headers(); i++ )
+        if (request->headerName(i).equals(F("If-None-Match")))
+            return request->header(i).toInt();
     return -1;
 }
 
-bool sendFile(String path, bool cache = true) {
+bool sendFile(AsyncWebServerRequest *request, String path, bool cache = true) {
     if (path.endsWith(F("/")))
         return false;
-    String existpath = path + (LittleFS.exists(path + ".gz") ? ".gz" : "");
-    String contentType = getContentType(path);
-    if (LittleFS.exists(existpath)) {
-        if (CACHE_DASHBOARD && cache) {
-            if (getHeaderCacheVersion() == dashboardVersion) {
-                server->send(304);
-                return true;
-            }
-            server->sendHeader(F("ETag"), String(dashboardVersion, 10));
-            server->sendHeader(F("Cache-Control"), F("no-cache"));
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, path, getContentType(path));
+    if (!response)
+        return false;
+    /*if (CACHE_DASHBOARD && cache) {
+        if (getHeaderCacheVersion(request) == dashboardVersion) {
+            request->send(304);
+            return true;
         }
-        File file = LittleFS.open(existpath, "r");
-        server->streamFile(file, contentType);
-        file.close();
-        return true;
-    }
-    return false;
+        response->addHeader("ETag", String(dashboardVersion, 10));
+        response->addHeader(F("Cache-Control"), F("no-cache"));
+    }*/
+    request->send(response);
+    return true;
 }
 
-void serveRoot() {
-    if (!sendFile(F("/index.html")))
-        server->send(200, F("text/html"), R"=====(
+void serveRoot(AsyncWebServerRequest *request) {
+    if (!sendFile(request, F("/index.html")))
+        request->send(200, "text/html", R"=====(
   <!DOCTYPE html>
   <html>
   <body>
@@ -715,10 +733,9 @@ void serveRoot() {
 )=====");
 }
 
-void serveConfig() {
-    if (server->method() == HTTP_POST) {
-        // Free as much memory as possible
-        if (displayBuffer.isAllocated())
+void serveSaveConfig(AsyncWebServerRequest *request, JsonVariant &json) {
+    DEBUG("SAVE CONFIG");
+    if (displayBuffer.isAllocated())
             displayBuffer.close();
         for (uint i = 0; i < widgets.size(); i++) {
             widgets[i].file.close();
@@ -726,95 +743,93 @@ void serveConfig() {
             widgets[i].tetris.reset();
 #endif
         }
-
         needsUpdate = true;
 
-        std::unique_ptr<char[]> buf(new char[MAX_CONFIG_FILE_SIZE]);
-
-        String jsonString = server->arg(F("plain"));
-        if (jsonString.length() > MAX_CONFIG_FILE_SIZE) {
-            server->send(400, "text/html", F("Config file is too large"));
-            return;
-        }
-        jsonString.toCharArray(buf.get(), MAX_CONFIG_FILE_SIZE);
-
         String error;
-        if (parseConfig(buf.get(), error)) {
+        if (parseConfig(json, error)) {
             LittleFS.remove("/config.json");
             File file = LittleFS.open("/config.json", "w");
-            file.print(jsonString.c_str());
+            serializeJson(json, file);
             file.close();
             Serial.println(F("Successfully updated config file"));
-            server->send(200);
+            request->send(200);
         } else {
             Serial.printf("Failed to update config file: %s\n", error.c_str());
-            server->send(400, "text/plain", error);
+            request->send(400, F("text/plain"), error);
         }
-    } else {
-        if (!sendFile(F("/config.json"), false)) {
-            writeDefaultConfig();
-            sendFile(F("/config.json"), false);
-        }
+}
+
+void serveConfig(AsyncWebServerRequest *request) {
+    if (!sendFile(request, F("/config.json"), false)) {
+        writeDefaultConfig();
+        if (!sendFile(request, F("/config.json"), false))
+            request->send(500, F("text/plain"), F("Config file error"));
     }
 }
 
-void serveFullUpdate() {
-    queueFullUpdate();
-    server->send(200);
+void serveFullUpdate(AsyncWebServerRequest *request) {
+    needsUpdate = true;
+    request->send(200);
 }
 
-void serveNotFound() {
-    if (!sendFile(server->uri()))
-        server->send(404, "text/html", F("Not found"));
+void serveNotFound(AsyncWebServerRequest *request) {
+    if (request->method() == HTTP_OPTIONS) {
+        request->send(200);
+        return;
+    }
+  
+    DEBUG("Not found: %s %s %s\n", request->url().c_str(), request->contentType().c_str(), request->methodToString());
+    if (!sendFile(request, request->url()))
+        request->send(404, "text/html", F("Not found"));
 }
 
-void serveRestart() {
-    server->send(200);
-    delay(2000);
-    ESP.restart();
+void serveRestart(AsyncWebServerRequest *request) {
+    closeConnection(request);
+    needsRestart = true;
 }
 
-void startOTA() {
+void startOTA(AsyncWebServerRequest *request) {
     state = STATE_UPDATING;
     LittleFS.end();
-    server->send(200);
+    request->send(200);
 }
 
-void abortOTA() {
+void abortOTA(AsyncWebServerRequest *request) {
     state = STATE_NORMAL;
     LittleFS.begin();
-    server->send(200);
+    request->send(200);
     needsUpdate = true;
 }
 
-void serveStats() {
-    StaticJsonDocument<400> doc;
+void serveStats(AsyncWebServerRequest *request) {
+    AsyncJsonResponse* response = new AsyncJsonResponse();
+    JsonVariant& json = response->getRoot();
+
 #if USE_NTP
-    doc["uptime"] = ntpClient->getRawTime() - bootTime;
+    json["uptime"] = ntpClient->getRawTime() - bootTime;
 #endif
     char reason[25];
-    doc["version"] = VERSION_CODE;
+    json["version"] = VERSION_CODE;
 #ifdef ESP8266
-    doc["resetReason"] = strcpy(reason, ESP.getResetReason().c_str());
-    doc["fragmentation"] = ESP.getHeapFragmentation();
-    doc["memoryFree"] = ESP.getFreeHeap();
+    json["resetReason"] = strcpy(reason, ESP.getResetReason().c_str());
+    json["fragmentation"] = ESP.getHeapFragmentation();
+    json["memoryFree"] = ESP.getFreeHeap();
     FSInfo info;
     LittleFS.info(info);
-    doc["filesystemUsed"] = info.usedBytes;
-    doc["filesystemTotal"] = info.totalBytes;
-    doc["maxOpenFiles"] = info.maxOpenFiles;
-    doc["maxPathLength"] = info.maxPathLength;
-    doc["vcc"] = ESP.getVcc();
+    json["filesystemUsed"] = info.usedBytes;
+    json["filesystemTotal"] = info.totalBytes;
+    json["maxOpenFiles"] = info.maxOpenFiles;
+    json["maxPathLength"] = info.maxPathLength;
+    json["vcc"] = ESP.getVcc();
 #endif
-    doc["transparencyBuffer"] = displayBuffer.isAllocated();
-    doc["platform"] = BOARD_NAME;
-    doc["width"] = DISPLAY_WIDTH;
-    doc["height"] = DISPLAY_HEIGHT;
-    doc["brightness"] = currentBrightness;
-    doc["brightnessSensor"] = analogRead(BRIGHTNESS_SENSOR_PIN);
-    std::unique_ptr<char[]> buf(new char[350]);
-    serializeJson(doc, buf.get(), 350);
-    server->send(200, "text/plain", buf.get());
+    json["transparencyBuffer"] = displayBuffer.isAllocated();
+    json["platform"] = BOARD_NAME;
+    json["width"] = DISPLAY_WIDTH;
+    json["height"] = DISPLAY_HEIGHT;
+    json["brightness"] = currentBrightness;
+    json["brightnessSensor"] = analogRead(BRIGHTNESS_SENSOR_PIN);
+    response->setLength();
+    request->send(response);
 }
 
 void writeDefaultImageData() {
@@ -883,7 +898,7 @@ Dir getImageDir() {
 #endif
 }
 
-void serveImageData() {
+void serveImageData(AsyncWebServerRequest *request) {
     Dir imageDir = getImageDir();
     std::map <std::string, FSImage> fsImageData = getFSImageData();
 
@@ -909,71 +924,65 @@ void serveImageData() {
 
     std::unique_ptr<char[]> buf(new char[size]);
     serializeJson(doc, buf.get(), size);
-    server->send(200, F("text/json"), buf.get());
+    request->send(200, F("text/json"), buf.get());
 }
 
-void uploadImage() {
+void serveUploadImage(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
     for (uint i = 0; i < widgets.size(); i++)
         widgets[i].file.close();
-    static File fsUploadFile;
-    HTTPUpload &upload = server->upload();
-    if (upload.status == UPLOAD_FILE_START) {
-        String filename = "/images/" + server->arg("name");
-        Serial.printf("Uploading image: %s\n", filename.c_str());
-        fsUploadFile = LittleFS.open(filename, "w");
-        if (!fsUploadFile) {
-            Serial.println(F("Failed to open image upload file"));
-            server->send(500);
-        }
-    } else if (upload.status == UPLOAD_FILE_WRITE) {
-        if (fsUploadFile)
-            fsUploadFile.write(upload.buf, upload.currentSize);
-    } else if (upload.status == UPLOAD_FILE_END) {
-        if (fsUploadFile) {
-            fsUploadFile.close();
+    String imageFilename = "/images/" + request->arg("name");
+
+    if (!index) {
+        DEBUG("Uploading Image: %s\n", request->arg("name").c_str());
+        request->_tempFile = LittleFS.open(imageFilename, "w");
+    }
+
+    if (request->_tempFile && request->_tempFile.write(data, len) != len) {
+        Serial.printf("Error saving image: %i\n", request->_tempFile.getWriteError());
+        request->_tempFile.close();
+    }
+
+    if (final) {
+        if (request->_tempFile) {
             std::map <std::string, FSImage> fsImageData = getFSImageData();
-            fsImageData[server->arg("name").c_str()] = {strtoul(server->arg("width").c_str(), NULL, 10),
-                                                        strtoul(server->arg("height").c_str(), NULL, 10),
-                                                        strtoul(server->arg("length").c_str(), NULL, 10)};
+            fsImageData[request->arg(F("name")).c_str()] = {strtoul(request->arg(F("width")).c_str(), NULL, 10),
+                                                        strtoul(request->arg(F("height")).c_str(), NULL, 10),
+                                                        strtoul(request->arg(F("length")).c_str(), NULL, 10)};
             writeFSImageData(fsImageData);
-            Serial.print("Image Size: ");
-            Serial.println(upload.totalSize);
             needsUpdate = true;
         } else {
-            String filename = "/images/" + server->arg("name");
-            if (LittleFS.exists(filename))
-                LittleFS.remove(filename);
+            request->send(400, F("text/plain"), F("Failed to save image"));
+            if (LittleFS.exists(imageFilename))
+                LittleFS.remove(imageFilename);
         }
     }
 }
 
-void serveImage() {
-    String image = server->arg(F("image"));
+void serveImage(AsyncWebServerRequest *request) {
+    String image = request->arg(F("image"));
     if (image.endsWith(F("_P"))) {
         std::string progmem = std::string(image.substring(0, image.length() - 2).c_str());
         if (progmemImages.count(progmem) < 1) {
-            server->send(404);
+            request->send(404);
             return;
         }
-        uint size = (progmemImages[progmem].type == IMAGE_GIMP ? 4 : 2) * progmemImages[progmem].width *
+        size_t size = (progmemImages[progmem].type == IMAGE_GIMP ? 4 : 2) * progmemImages[progmem].width *
                     progmemImages[progmem].height * progmemImages[progmem].length;
-        server->sendHeader(F("Content-Description"), F("File Transfer"));
-        server->sendHeader(F("Content-Transfer-Encoding"), F("binary"));
-        server->send_P(200, "application/binary", (PGM_P) progmemImages[progmem].data, size);
+        request->send_P(200, F("application/binary"), (uint8_t*) progmemImages[progmem].data, size);
     } else {
-        if (!sendFile("/images/" + image, false)) {
+        if (!sendFile(request, "/images/" + image, false)) {
             DEBUG("Image doesn't exist: %s\n", image.c_str());
-            server->send(404);
+            request->send(404);
         }
     }
 }
 
-void serveRenameImage() {
-    String name = server->arg(F("name"));
-    String newName = server->arg(F("newName"));
+void serveRenameImage(AsyncWebServerRequest *request) {
+    String name = request->arg(F("name"));
+    String newName = request->arg(F("newName"));
     if (!LittleFS.exists("/images/" + name)) {
         DEBUG("Image to rename doesn't exist: %s\n", name.c_str());
-        server->send(404);
+        request->send(404);
     } else {
         if (LittleFS.exists("/images/" + newName))
             LittleFS.remove("/images/" + newName);
@@ -982,25 +991,21 @@ void serveRenameImage() {
         fsImageData[newName.c_str()] = fsImageData[name.c_str()];
         fsImageData.erase(name.c_str());
         writeFSImageData(fsImageData);
-        server->send(200);
+        request->send(200);
     }
 }
 
-void serveOK() {
-    server->send(200);
-}
-
-void serveDeleteImage() {
+void serveDeleteImage(AsyncWebServerRequest *request) {
     for (uint i = 0; i < widgets.size(); i++)
         widgets[i].file.close();
-    std::string name = server->arg(F("name")).c_str();
+    std::string name = request->arg(F("name")).c_str();
     std::map <std::string, FSImage> fsImageData = getFSImageData();
     fsImageData.erase(name);
     std::string filename = "/images/" + name;
     if (LittleFS.exists(filename.c_str()))
         LittleFS.remove(filename.c_str());
     writeFSImageData(fsImageData);
-    server->send(200);
+    request->send(200);
 }
 
 void deleteAllImages() {
@@ -1021,63 +1026,82 @@ void deleteAllImages() {
 #endif
 }
 
-void serveDeleteAllImages() {
+void serveDeleteAllImages(AsyncWebServerRequest *request) {
     deleteAllImages();
-    server->send(200);
+    request->send(200);
 }
 
-void serveResetConfiguration() {
+void serveResetConfiguration(AsyncWebServerRequest *request) {
     writeDefaultConfig();
-    server->send(200);
-    delay(2000);
-    ESP.restart();
+    closeConnection(request);
+    needsRestart = true;
 }
 
-void serveFactoryReset() {
+void serveOK(AsyncWebServerRequest *request) {
+    request->send(200);
+}
+
+void serveFactoryReset(AsyncWebServerRequest *request) {
     writeDefaultConfig();
     deleteAllImages();
-    server->send(200);
-    ESP_WiFiManager wifiManager;
+    AsyncWiFiManager wifiManager(&server, &dnsServer);
     wifiManager.resetSettings();
-    delay(2000);
-    ESP.restart();
+    needsRestart = true;
+    closeConnection(request);
+}
+
+void serveOTA(AsyncWebServerRequest *request) {
+    needsRestart = !Update.hasError();
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", needsRestart ? "OK" : String(Update.getError(), 10));
+    response->addHeader("Connection", "close");
+    request->send(response);
+}
+
+void serveOTAUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+    if (!index) {
+        Update.runAsync(true);
+        if (filename.equals("firmware")) {
+            if(!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000))
+                Update.printError(Serial);
+        } else {
+            LittleFS.end();
+            if (!Update.begin((size_t) &_FS_end - (size_t) &_FS_start, U_FS))
+                Update.printError(Serial);
+        }
+    }
+    if (!Update.hasError() && Update.write(data, len) != len)
+      Update.printError(Serial);
+    if (final) {
+      if(Update.end(true))
+        Serial.printf("Update Success: %uB\n", index+len);
+      else
+        Update.printError(Serial);
+    }
 }
 
 void setupWebserver() {
-#if ESP32
-    server = new WebServer(80);
-#else
-    server = new ESP8266WebServer(80);
-#endif
-    server->on(F("/"), serveRoot);
-    #if USE_OTA_UPDATING
-    updateServer.setup(server);
-    #endif
-
-    // Track cache header
-    if (CACHE_DASHBOARD) {
-        const char * headerkeys[] = {"If-None-Match"} ;
-        size_t headerkeyssize = sizeof(headerkeys)/sizeof(char*);
-        server->collectHeaders(headerkeys, headerkeyssize);
-    }
-
-    server->on(F("/config"), serveConfig);
-    server->on(F("/abortUpdate"), abortOTA);
-    server->on(F("/beginUpdate"), startOTA);
-    server->on(F("/fullRefresh"), serveFullUpdate);
-    server->on(F("/restart"), serveRestart);
-    server->on(F("/stats"), serveStats);
-    server->on(F("/uploadImage"), HTTP_POST, serveOK, uploadImage);
-    server->on(F("/image"), HTTP_GET, serveImage);
-    server->on(F("/images"), serveImageData);
-    server->on(F("/deleteImage"), serveDeleteImage);
-    server->on(F("/deleteAllImages"), serveDeleteAllImages);
-    server->on(F("/renameImage"), serveRenameImage);
-    server->on(F("/factoryReset"), serveFactoryReset);
-    server->on(F("/resetConfiguration"), serveResetConfiguration);
-    server->onNotFound(serveNotFound);
+    server.on("/", serveRoot);
+    server.on("/index.html", serveRoot);
+    server.on("/config", HTTP_GET, serveConfig);
+    server.addHandler(new AsyncCallbackJsonWebHandler("/config", serveSaveConfig, MAX_CONFIG_FILE_SIZE));
+    server.on("/update", HTTP_POST, serveOTA, serveOTAUpload);
+    server.on("/abortUpdate", abortOTA);
+    server.on("/beginUpdate", startOTA);
+    server.on("/fullRefresh", serveFullUpdate);
+    server.on("/restart", serveRestart);
+    server.on("/stats", serveStats);
+    server.on("/uploadImage", HTTP_POST, serveOK, serveUploadImage);
+    server.on("/image", serveImage);
+    server.on("/images", serveImageData);
+    server.on("/deleteImage", serveDeleteImage);
+    server.on("/deleteAllImages", serveDeleteAllImages);
+    server.on("/renameImage", serveRenameImage);
+    server.on("/factoryReset", serveFactoryReset);
+    server.on("/resetConfiguration", serveResetConfiguration);
+    server.serveStatic("/", LittleFS, "/", CACHE_DASHBOARD ? "no-cache" : __null);
+    server.onNotFound(serveNotFound);
     Serial.println(F("Starting configuration webserver..."));
-    server->begin();
+    server.begin();
 }
 
 #pragma endregion
@@ -1481,7 +1505,7 @@ void updateWidget(Widget &widget) {
     }
 
     if (widget.background)
-        queueFullUpdate();
+        needsUpdate = true;
     widget.lastUpdate = millis();
 }
 
@@ -1502,7 +1526,6 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
         displayBuffer.write(display, widget.xOff, widget.yOff, widget.width, widget.height);
 
 
-    // Todo: check if background widgets change to queue a full update on the next frame
     switch (widget.type) {
         case WIDGET_PROGMEM_IMAGE:
             switch (progmemImages[widget.content].type) {
@@ -1740,10 +1763,11 @@ void setup() {
     display_ticker.attach(0.002, display_updater);
 #endif
 #ifdef ESP32
+    xTaskCreatePinnedToCore(displayUpdateTask, "displayUpdateTask", 2048, NULL, 4, &displayUpdateTaskHandle, 1);
     timer = timerBegin(0, 80, true);
     timerAttachInterrupt(timer, &display_updater, true);
     timerAlarmWrite(timer, 2000, true);
-    timerAlarmEnable(timer);
+    timerAlarmEnable(timer);;
 #endif
     //display.setBrightness(1);
     display.setPanelsWidth(DISPLAY_PANELS);
@@ -1764,7 +1788,7 @@ void setup() {
     else
         Serial.println(F("Failed to read version file."));
 
-    ESP_WiFiManager wifiManager;
+    AsyncWiFiManager wifiManager(&server, &dnsServer);
     wifiManager.setAPCallback(onStartAccessPoint);
 
     if (drd.detectDoubleReset()) {
@@ -1809,7 +1833,6 @@ void setup() {
         display.showBuffer();
         needsConfig = true;
         while (needsConfig) {
-            server->handleClient();
             updateArduinoOTA();
             yield();
         }
@@ -1825,6 +1848,9 @@ void setup() {
 }
 
 void loop() {
+    if (needsRestart)
+        ESP.restart();
+
     updateTime();
     updateWeather();
     updateSunMoon();
@@ -1837,13 +1863,10 @@ void loop() {
             updateScreen(needsUpdate);
             break;
         case STATE_UPDATING:
-            display.fillScreen(BLUE);
-            display.setCursor(0, 0);
-            display.print(F("Updating, \nDo not \npower off"));
+            display.fillScreen(BLACK);
             display.showBuffer();
             break;
     }
 
-    server->handleClient();
     updateArduinoOTA();
 }
