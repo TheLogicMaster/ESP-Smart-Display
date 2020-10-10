@@ -643,7 +643,7 @@ Vue.mixin({
     bloatConfig(config) {
       config.backgroundColor = config.backgroundColor || '0x000000'
       config.metric = config.metric || false
-      config.timezone = config.timezone || 'eastern'
+      config.timezone = config.timezone || 'America/Detroit'
       config.weatherLocation = config.weatherLocation || ''
       config.weatherKey = config.weatherKey || ''
       config.scanPattern = config.scanPattern || 0
@@ -722,7 +722,7 @@ Vue.prototype.$axios = axios
 
 let address = window.location.protocol + '//' + window.location.hostname + window.location.pathname + (window.location.port === '' ? '' : ':' + window.location.port)
 if (address.includes(':8080'))
-  address = 'http://10.0.0.139:80'
+  address = 'http://10.0.0.84:80'
 axios.defaults.baseURL = address
 
 Vue.filter('capitalize', function (value) {

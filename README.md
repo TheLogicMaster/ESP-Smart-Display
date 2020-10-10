@@ -66,9 +66,10 @@ To use Arduino IDE, the following libraries must be installed through the librar
 * PxMatrix
 * Adafruit GFX Library
 * ESP_DoubleResetDetector
-* [ESPAsyncWiFiManager]() (Manually install)
-* [AsyncTCP]() (Manually install)
-* [ESP Async WebServer]() (Manually install)
+* [ESPAsyncWiFiManager](https://github.com/alanswx/ESPAsyncWiFiManager) (Manually install)
+* [ESPAsyncTCP](https://github.com/me-no-dev/ESPAsyncTCP) (If using ESP8266, manually install)
+* [AsyncTCP](https://github.com/me-no-dev/AsyncTCP) (If using ESP8266, manually install)
+* [ESPAsyncWebServer](https://github.com/me-no-dev/ESPAsyncWebServer) (Manually install)
 * ArduinoJson
 * Time
 * WeatherStation (And dependencies if using ESP8266 and Weather)

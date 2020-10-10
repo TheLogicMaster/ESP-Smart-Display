@@ -15,4 +15,5 @@ echo $(grep DASHBOARD_VERSION .env | cut -d '=' -f2) >> ./dist/version.txt
 rm -r ../led-matrix-display/data
 mkdir ../led-matrix-display/data
 cp -r ./dist/* ../led-matrix-display/data
+cp -r ../fs-data/* ../led-matrix-display/data
 echo Done

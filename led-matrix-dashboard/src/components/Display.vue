@@ -105,7 +105,8 @@ export default {
               content: 'blm',
               background: true,
               frequency: 5000,
-              length: 2
+              length: 2,
+              type:1
             }
           ]
           break

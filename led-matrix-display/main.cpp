@@ -149,16 +149,14 @@
 //#include <ESP_WiFiManager.h>
 #include <ESPAsyncWiFiManager.h>
 #if USE_NTP
-#include <NTPClient.h>
+#include <ezTime.h>
 #endif
-#include <TimeLib.h>
 #include <map>
 #if USE_WEATHER
 #include <JsonListener.h>
 #include <OpenWeatherMapForecast.h>
 #include "TinyIcons.h"
 #endif
-#include <Timezone.h>
 #if USE_SUNRISE
 #include <SunMoonCalc.h>
 #endif
@@ -174,25 +172,7 @@
 #include "Taz.h"
 #include "Mario.h"
 #include "Youtube.h"
-#endif
-
-TimeChangeRule EDT = {"EDT", Second, Sun, Mar, 2, -240};    //Daylight time = UTC - 4 hours
-TimeChangeRule EST = {"EST", First, Sun, Nov, 2, -300};     //Standard time = UTC - 5 hours
-Timezone Eastern(EDT, EST);
-TimeChangeRule CDT = {"CDT", Second, Sun, Mar, 2, -300};    //Daylight time = UTC - 5 hours
-TimeChangeRule CST = {"CST", First, Sun, Nov, 2, -360};     //Standard time = UTC - 6 hours
-Timezone Central(CDT, CST);
-TimeChangeRule MDT = {"MDT", Second, Sun, Mar, 2, -360};    //Daylight time = UTC - 6 hours
-TimeChangeRule MST = {"MST", First, Sun, Nov, 2, -420};     //Standard time = UTC - 7 hours
-Timezone Mountain(MDT, MST);
-TimeChangeRule PDT = {"PDT", Second, Sun, Mar, 2, -420};    //Daylight time = UTC - 7 hours
-TimeChangeRule PST = {"PST", First, Sun, Nov, 2, -480};     //Standard time = UTC - 8 hours
-Timezone Pacific(PDT, PST);
-
-std::map<std::string, Timezone *> timezones = {{"eastern",  &Eastern},
-                                               {"central",  &Central},
-                                               {"mountain", &Mountain},
-                                               {"pacific",  &Pacific}};
+#endif                                            
 
 #pragma region PxMatrix
 //#define PxMATRIX_COLOR_DEPTH 4
@@ -367,7 +347,7 @@ public:
 std::map <std::string, ProgmemImage> progmemImages = {
 #if USE_PROGMEM_IMAGES
                                                      {"taz",  {23, 28, 1,  IMAGE_UINT16, taz}},
-                                                     {"blm",  {64, 32, 36, IMAGE_UINT8,  blmAnimations}},
+                                                     //{"blm",  {64, 32, 36, IMAGE_UINT8,  blmAnimations}},
                                                      {"mario",  {64, 32, 1, IMAGE_UINT16,  mario}},
                                                      {"youtube", {21, 16, 1, IMAGE_UINT16, youtube}}
 #endif
@@ -385,7 +365,6 @@ uint8_t brightnessBrightMin;
 uint8_t brightnessBrightHour;
 uint8_t brightnessDimMin;
 uint8_t brightnessDimHour;
-std::string localTimezone;
 bool usingWeather;
 bool usingTransparency;
 bool metric;
@@ -429,8 +408,9 @@ AsyncWebServer server(80);
 DNSServer dnsServer;
 
 #if USE_NTP
-NTPClient *ntpClient;
+Timezone timezone;
 #endif
+
 #if USE_WEATHER
 OpenWeatherMapForecast weatherClient;
 #endif
@@ -445,7 +425,7 @@ ADC_MODE(ADC_VCC);
 void writeDefaultConfig() {
     LittleFS.remove("/config.json");
     File file = LittleFS.open("/config.json", "w");
-    file.print(F("{\"widgets\":[{\"xOff\":17,\"yOff\":11,\"type\":4,\"transparent\":false,\"font\":2,\"content\":\"Hello\",\"colors\":[\"0x000000\"],\"width\":30,\"height\":8,\"backgroundColor\":\"0x00FFFF\"}],\"brightnessMode\":0,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":\"0x00FFFF\",\"timezone\":\"eastern\",\"metric\":false,\"weatherKey\":\"\",\"weatherLocation\":\"5014227\"}"));
+    file.print(F("{\"widgets\":[{\"xOff\":17,\"yOff\":11,\"type\":4,\"transparent\":false,\"font\":2,\"content\":\"Hello\",\"colors\":[\"0x000000\"],\"width\":30,\"height\":8,\"backgroundColor\":\"0x00FFFF\"}],\"brightnessMode\":0,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":\"0x00FFFF\",\"timezone\":\"America/Detroit\",\"metric\":false,\"weatherKey\":\"\",\"weatherLocation\":\"5014227\"}"));
     file.close();
 }
 
@@ -479,11 +459,8 @@ bool parseConfig(JsonVariant& json, String& errorString) {
     bool tempMetric = json["metric"];
     bool tempTransparency = false;
     bool tempFastUpdate = json["fastUpdate"];
-    std::string tempTimezone = json["timezone"].isNull() ? "eastern" : std::string(json["timezone"].as<char *>());
-    if (timezones.count(tempTimezone) == 0) {
-        errorString.concat(F("Invalid timezone"));
-        return false;
-    }
+    String tempTimezone = json["timezone"].isNull() ? "America/Detroit" : String(json["timezone"].as<char *>());
+
     uint8_t tempBrightnessMode = json["brightnessMode"];
     bool tempUsingSunMoon = tempBrightnessMode == BRIGHTNESS_SUN;
     uint8_t tempBrightnessDim = json["brightnessLower"];
@@ -577,8 +554,17 @@ bool parseConfig(JsonVariant& json, String& errorString) {
     }
 
     // Only load new configuration after successful completion of config parsing
-    for (uint i = 0; i < widgets.size(); i++)
+#if USE_NTP
+    if (!timezone.setLocation(tempTimezone)) {
+        errorString.concat(F("Failed to set timezone"));
+        return false;
+    }
+#endif
+
+    for (uint i = 0; i < widgets.size(); i++) {
         widgets[i].file.close();
+        widgets[i].dirty = true; // Start dirty to ensure widgets like clocks always have content
+    }
 
     needsUpdate = true;
     needsConfig = false;
@@ -594,7 +580,6 @@ bool parseConfig(JsonVariant& json, String& errorString) {
     brightnessSensorDark = tempBrightnessSensorDark;
     usingSunMoon = tempUsingSunMoon;
     backgroundColor = tempBackgroundColor;
-    localTimezone = tempTimezone;
     usingWeather = tempUsingWeather;
     weatherLocation = tempWeatherLocation;
     weatherKey = tempWeatherKey;
@@ -805,9 +790,22 @@ void abortOTA(AsyncWebServerRequest *request) {
 void serveStats(AsyncWebServerRequest *request) {
     AsyncJsonResponse* response = new AsyncJsonResponse();
     JsonVariant& json = response->getRoot();
-
+#ifdef ESP32
+    uint features = 1;
+#else
+    uint features = 0;
+#endif
+    features |= USE_BRIGHTNESS_SENSOR << 1;
+    features |= USE_DOUBLE_BUFFERING << 2;
+    features |= USE_HTTPS << 3;
+    features |= USE_NTP << 4;
+    features |= USE_PROGMEM_IMAGES << 5;
+    features |= USE_SUNRISE << 6;
+    features |= USE_TETRIS << 7;
+    features |= USE_WEATHER << 8;
+    json["features"] = features;
 #if USE_NTP
-    json["uptime"] = ntpClient->getRawTime() - bootTime;
+    json["uptime"] = timezone.tzTime(TIME_NOW, UTC_TIME) - bootTime;
 #endif
     char reason[25];
     json["version"] = VERSION_CODE;
@@ -1448,7 +1446,7 @@ void incrementWidgetState(Widget &widget) {
 }
 
 void updateClockWidget(Widget &widget) {
-    if (widget.state != theMinute) {
+    if (widget.state != theMinute || widget.dirty) {
         widget.state = theMinute;
         widget.dirty = true;
         widget.finished = false;
@@ -1660,7 +1658,9 @@ void updateBrightness() {
             targetBrightness = isTimeInRange(brightnessBrightHour * 60 + brightnessBrightMin, brightnessDimHour * 60 + brightnessDimMin, theHour * 60 + theMinute) ? brightnessBright : brightnessDim;
             break;
         case BRIGHTNESS_SUN:
+#if USE_NTP
             targetBrightness = now() > sunRiseTime && now() < sunSetTime ? brightnessBright : brightnessDim;
+#endif
             break;
         default:
             Serial.print(F("Invalid brightness mode: "));
@@ -1699,23 +1699,24 @@ void updateWeather() {
 void updateSunMoon() {
     if (!usingSunMoon || (sunMoonTime != 0 && millis() - sunMoonTime < SUN_UPDATE_INTERVAL))
         return;
+    #if USE_SUNRISE && USE_NTP
     sunMoonTime = millis();
-
-    #if USE_SUNRISE
     SunMoonCalc sunMoonCalc = SunMoonCalc(now(), lattitude, longitude);
     SunMoonCalc::Sun sun = sunMoonCalc.calculateSunAndMoonData().sun;
-    sunRiseTime = timezones[localTimezone]->toLocal(sun.rise);
-    sunSetTime = timezones[localTimezone]->toLocal(sun.set);
+    sunRiseTime = timezone.tzTime(sun.rise, UTC_TIME);
+    sunSetTime = timezone.tzTime(sun.set, UTC_TIME);
     #endif
 }
 
 void updateTime() {
 #if USE_NTP
-    ntpClient->update();
-#endif
+    if (!bootTime && timeStatus() == timeSet) 
+        bootTime = timezone.tzTime(TIME_NOW, UTC_TIME);
+    events(); // Handle NTP events
     theHour12 = hourFormat12();
     theHour = hour();
     theMinute = minute();
+#endif
 }
 
 void setupArduinoOTA() {
@@ -1805,15 +1806,13 @@ void setup() {
         Serial.println(F("Attemping to connect to network..."));
         display.print(F("Connecting..."));
         display.showBuffer();
-        wifiManager.autoConnect("LED Matrix Display");
+        wifiManager.autoConnect("LED Matrix Display", __null, 5);
     }
 
     drd.stop();
+    server.reset();
     Serial.print(F("Connected to network with IP: "));
     Serial.println(WiFi.localIP());
-
-    std::string result;
-    Serial.println(result.c_str());
 
     // Development OTA
     setupArduinoOTA();
@@ -1826,10 +1825,9 @@ void setup() {
     //LittleFS.remove("/config.json");
 
 #if USE_NTP
-    ntpClient = new NTPClient("time.nist.gov", 0, NTP_UPDATE_INTERVAL);
-    ntpClient->begin();
-    ntpClient->forceUpdate();
-    bootTime = ntpClient->getRawTime();
+    //waitForSync(5);
+    timezone.setDefault();
+    //waitForSync(2);
 #endif
 
     if (needsConfig || !getConfig()) {
@@ -1841,17 +1839,13 @@ void setup() {
         needsConfig = true;
         while (needsConfig) {
             updateArduinoOTA();
+            updateTime();
             yield();
         }
         Serial.println(F("Successfully configured display"));
     }
 
     display.setTextWrap(false);
-
-#if USE_NTP
-    setSyncProvider([]() { return timezones[localTimezone]->toLocal(ntpClient->getRawTime()); });
-    setSyncInterval(10);
-#endif
 }
 
 void loop() {

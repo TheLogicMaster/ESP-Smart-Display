@@ -17,15 +17,9 @@
           <label>WeatherMap Location</label>
           <md-input v-model="config.weatherLocation"></md-input>
         </md-field>
-        <md-field>
+        <md-autocomplete v-model="config.timezone" :md-options="timezones">
           <label>Timezone</label>
-          <md-select v-model="config.timezone">
-            <md-option value="eastern">Eastern</md-option>
-            <md-option value="central">Central</md-option>
-            <md-option value="mountain">Mountain</md-option>
-            <md-option value="pacific">Pacific</md-option>
-          </md-select>
-        </md-field>
+        </md-autocomplete>
         <md-field>
           <label>Scan Pattern</label>
           <md-select v-model.number="config.scanPattern">
@@ -103,12 +97,15 @@
 </template>
 
 <script>
+import moment from 'moment-timezone'
 export default {
   name: "Settings",
   data: () => ({
-    config: {}
+    config: {},
+    timezones: []
   }),
   async mounted() {
+    this.timezones = moment.tz.names()
     await this.reload()
   },
   methods: {

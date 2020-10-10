@@ -17,6 +17,7 @@
     "vue-material": "^1.0.0-beta-15",
     "vue-mobile-detection": "^1.0.0",
     "vue-moment": "^4.1.0",
+    "moment-timezone": "^0.5.31",
     "vue-progressbar": "^0.7.5",
     "vue-router": "^3.4.3",
     "vue-scrollto": "^2.18.2",

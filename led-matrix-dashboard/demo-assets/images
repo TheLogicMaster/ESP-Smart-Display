@@ -1,1 +1,1 @@
-{"blm":{"width":64,"height":32,"length":36,"type":0,"progmem":true},"mario":{"width":64,"height":32,"length":1,"type":1,"progmem":true},"taz":{"width":23,"height":28,"length":1,"type":1,"progmem":true}}
+{"mario":{"width":64,"height":32,"length":1,"type":1,"progmem":true},"taz":{"width":23,"height":28,"length":1,"type":1,"progmem":true},"youtube":{width:21,height:16,length:1,type:1,progmem:true},"blm":{"width":64,"height":32,"length":36,"type":0,"progmem":false}}
