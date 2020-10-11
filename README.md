@@ -121,7 +121,7 @@ functions. The sidebar handles navigation between pages, and the page names shou
 
 ## OTA Updates
 
-![OTA Update](/media/backup_and_restore.png?raw=true "OTA Update")
+<img src="/media/backup_and_restore.png?raw=true" height="100" width=""100">
 OTA Updates are as simple as downloading the newest release binary that matches your board configuration and selecting
 it from the *OTA Update* page of the dashboard. Alternatively if you have a non-stock configuration, pull the repo
 changes and build and deploy the dashboard and firmware again. The dashboard can also automatically download and flash
