@@ -120,17 +120,15 @@ environments, but the mobile part is not seamless yet. The interface is broken u
 functions. The sidebar handles navigation between pages, and the page names should be pretty self-explanatory.
 
 ## OTA Updates
+<img src="media/ota_update.png?raw=true" height="300" width="300">
 
-<img src="media/backup_and_restore.png?raw=true" height="100" width="100">
-<img src="https://github.com/favicon.ico" width="48">
-
-![OTA Update](media/backup_and_restore.png?raw=true "OTA Update")
 OTA Updates are as simple as downloading the newest release binary that matches your board configuration and selecting
 it from the *OTA Update* page of the dashboard. Alternatively if you have a non-stock configuration, pull the repo
 changes and build and deploy the dashboard and firmware again. The dashboard can also automatically download and flash
 the latest binaries if you are using a stock configuration. 
 
-![Backup and Restore](media/backup_and_restore.png?raw=true "Backup and Restore")
+<img src="media/backup_and_restore.png?raw=true" height="300" width="300">
+
 Ensure that you download a backup of the configuration before updating, otherwise all configuration settings and custom
 images will be lost. This can be done in the *Backup* page. After updating, simply upload your backup and everything should
 be restored. 
@@ -141,7 +139,16 @@ primarily intended to be configured using the graphical interface, but the *Raw 
 to directly edit the JSON file. If the dashboard isn't required, the configuration files could manually be uploaded
 using the data directory. `configuration.json` is used to store the display configuration, and `images.json` stores
 the properties of custom images.
- 
+
+## Image Editor
+<img src="media/image_editor.png?raw=true" height="500" width="700">
+
+The *Image Editor* page houses a basic image editor that can be used to import and pixelate custom images, or copy and 
+edit built-in images. More features are to come like copying and pasting image frames, a bucket tool, and an eye dropper
+tool, but it is perfectly adequate for importing and editing pixel art type content. The image editor is also where you
+can download images to a variety of useful formats, including raw 565 binary, Gimp header, PNG, and JPG, so it also serves
+as an image converter.
+
 ## Widgets
 
 ### Text Based Widgets
