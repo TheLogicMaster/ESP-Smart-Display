@@ -91,7 +91,7 @@ export default {
   }),
   methods: {
     async loadPreset() {
-      if (!this.areObjectsEqual(this.$store.state.configuration, this.config) && !(await this.confirmAsync('Load Prefab', 'Are you sure you want to load a display preset? This will erase unsaved changes')))
+      if (!this.areObjectsEqual(this.$store.state.configuration, this.config) && !(await this.confirm('Load Preset', 'Are you sure you want to load a display preset? This will erase unsaved changes')))
         return
       this.config.widgets.length = 0
 
@@ -221,7 +221,7 @@ export default {
       this.addWidgetType = 0
     },
     async reload() {
-      if (!this.areObjectsEqual(this.$store.state.configuration, this.config) && !(await this.confirmAsync('Reload Config', 'Are you sure you want to reload the display configuration? This will erase unsaved changes')))
+      if (!this.areObjectsEqual(this.$store.state.configuration, this.config) && !(await this.confirm('Reload Config', 'Are you sure you want to reload the display configuration? This will erase unsaved changes')))
         return
       let result = await this.getConfig()
       if (result)
@@ -233,7 +233,7 @@ export default {
       this.config = this.cloneObject(this.$store.state.configuration)
     },
     async save() {
-      if (!(await this.confirmAsync('Save Config', 'Are you sure you want to save the display configuration? This will overwrite the current configuration.')))
+      if (!(await this.confirm('Save Config', 'Are you sure you want to save the display configuration? This will overwrite the current configuration.')))
         return
       let result = await this.saveConfig(this.config)
       if (result)

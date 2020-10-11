@@ -21,7 +21,7 @@ export default {
   }),
   methods: {
     async sendCommand(name) {
-      if (!(await this.confirmAsync('Send Command', `Are you sure you want to send command '${name}'?`)))
+      if (!(await this.confirm('Send Command', `Are you sure you want to send command '${name}'?`)))
         return
 
       try {

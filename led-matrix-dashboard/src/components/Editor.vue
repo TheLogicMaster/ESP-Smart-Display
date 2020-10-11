@@ -35,21 +35,21 @@ export default {
   methods: {
     async changeAutoSave() {
       if (this.autoSave) {
-        if (await this.confirmAsync('Auto-Save', 'Are you sure you want to enable autosaving? This will instantly overwrite the display configuration upon config changes.'))
+        if (await this.confirm('Auto-Save', 'Are you sure you want to enable autosaving? This will instantly overwrite the display configuration upon config changes.'))
           await this.save(this.jsonData)
         else
           this.autoSave = false
       }
     },
     async manualSave() {
-      if (await this.confirmAsync('Save Config', 'Are you sure you want to overwrite the current configuration?'))
+      if (await this.confirm('Save Config', 'Are you sure you want to overwrite the current configuration?'))
         await this.save(this.jsonData)
     },
     async save(jsonData) {
       await this.saveConfig(jsonData)
     },
     async manualReload() {
-      if (this.areObjectsEqual(this.$store.state.configuration, this.jsonData) || (await this.confirmAsync('Reload Config', 'Are you sure you want to reload the configuration file? Unsaved changes will be lost.')))
+      if (this.areObjectsEqual(this.$store.state.configuration, this.jsonData) || (await this.confirm('Reload Config', 'Are you sure you want to reload the configuration file? Unsaved changes will be lost.')))
         await this.reload()
     },
     async reload() {

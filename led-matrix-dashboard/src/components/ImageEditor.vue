@@ -43,7 +43,7 @@
           </md-button>
         </div>
         <div>
-          <md-button class="md-icon-button" @click="deleteFrame" :disabled="frame <= 0">
+          <md-button class="md-icon-button" @click="deleteFrame" :disabled="frames === 1">
             <md-icon>clear</md-icon>
           </md-button>
           <md-button class="md-icon-button" @click="frameBack" :disabled="frame <= 0">
@@ -188,6 +188,7 @@ export default {
       this.pixels.splice(this.frame * this.width * this.height, this.width * this.height)
       this.frames--
       this.frame--
+      this.frame = Math.max(0, this.frame)
       this.drawImage()
     },
     addFrame() {

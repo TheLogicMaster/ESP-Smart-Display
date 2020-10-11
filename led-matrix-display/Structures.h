@@ -11,6 +11,7 @@ struct Widget {
     std::string source; // The URL for get requests, for instance
     uint8_t contentType; // Extra information about the content
     std::string auth; // Authorization string for requests
+    std::string cert; // Root certificate for HTTPS
     std::vector <std::string> args; // Arguments for parsing of JSON response, for instance
     uint8_t xOff; // The X offset for the widget
     uint8_t yOff; // The Y offset for the widget

@@ -110,7 +110,7 @@ export default {
   },
   methods: {
     async confirmReload() {
-      if (this.areObjectsEqual(this.$store.state.configuration, this.config) || (await this.confirmAsync('Reload Settings', 'Are you sure you want to reload the settings? This will erase unsaved changes.')))
+      if (this.areObjectsEqual(this.$store.state.configuration, this.config) || (await this.confirm('Reload Settings', 'Are you sure you want to reload the settings? This will erase unsaved changes.')))
         await this.reload()
     },
     async reload() {
@@ -118,7 +118,7 @@ export default {
       this.config = this.cloneObject(this.$store.state.configuration)
     },
     async confirmSave() {
-      if (await this.confirmAsync('Save Settings','Are you sure you want to update the display settings? This will overwrite the current settings.'))
+      if (await this.confirm('Save Settings','Are you sure you want to update the display settings? This will overwrite the current settings.'))
         await this.save()
     },
     async save() {

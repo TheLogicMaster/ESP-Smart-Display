@@ -51,7 +51,13 @@
         <div>
           <md-field class="text-content-field inline">
             <label>API URL</label>
-            <md-input class="text-content-field" v-model="widget.source" @change="changeText"></md-input>
+            <md-input class="text-content-field" v-model="widget.source"></md-input>
+          </md-field>
+        </div>
+        <div>
+          <md-field class="text-content-field inline">
+            <label>Root Certificate</label>
+            <md-textarea md-autogrow class="text-content-field" v-model="widget.cert" @change="changeCert"></md-textarea>
           </md-field>
         </div>
         <md-field class="duration-field field">
@@ -243,6 +249,9 @@ export default {
     changeText () {
       if (this.widget.type === 4)
         this.widget.content = this.widget.content.toUpperCase()
+    },
+    changeCert() {
+      console.log(this.widget.cert)
     },
     changeBackgroundColor(color) {
       this.widget.backgroundColor = this.jsHexToCpp(color)

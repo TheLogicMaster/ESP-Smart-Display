@@ -130,14 +130,16 @@
 #define Dir File
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include <WiFiMulti.h>
-//#include <WiFiClientSecure.h>
 //#define sint16_t signed short
 //#define sint32_t signed long
 #else // ESP8266 Specific
 #include <ESPAsyncTCP.h>
 #include <LittleFS.h>
 #include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
 #endif
 
 // Common Libraries
@@ -540,7 +542,8 @@ bool parseConfig(JsonVariant& json, String& errorString) {
                                    widget["content"].isNull() ? "" : std::string(widget["content"].as<char *>()),
                                    widget["source"].isNull() ? "" : std::string(widget["source"].as<char *>()),
                                    widget["contentType"],
-                                   widget["auth"].isNull() ? "" : std::string(widget["auth"].as<char *>()), args,
+                                   widget["auth"].isNull() ? "" : std::string(widget["auth"].as<char *>()), 
+                                   widget["cert"].isNull() ? "" : std::string(widget["cert"].as<char *>()), args,
                                    widget["xOff"], widget["yOff"], widget["width"], widget["height"],
                                    widget["frequency"], widget["offset"], widget["length"], colors,
                                    widget["font"],
@@ -807,12 +810,11 @@ void serveStats(AsyncWebServerRequest *request) {
 #if USE_NTP
     json["uptime"] = timezone.tzTime(TIME_NOW, UTC_TIME) - bootTime;
 #endif
-    char reason[25];
     json["version"] = VERSION_CODE;
 #ifdef ESP8266
+    char reason[25];
     json["resetReason"] = strcpy(reason, ESP.getResetReason().c_str());
     json["fragmentation"] = ESP.getHeapFragmentation();
-    json["memoryFree"] = ESP.getFreeHeap();
     FSInfo info;
     LittleFS.info(info);
     json["filesystemUsed"] = info.usedBytes;
@@ -820,7 +822,20 @@ void serveStats(AsyncWebServerRequest *request) {
     json["maxOpenFiles"] = info.maxOpenFiles;
     json["maxPathLength"] = info.maxPathLength;
     json["vcc"] = ESP.getVcc();
+    uint16_t totalMemory;
+    ESP.getHeapStats(nullptr, &totalMemory, nullptr);
+    json["memoryTotal"] = totalMemory;
+#else
+    // Todo: Improve fragmentation calculation
+    json["fragmentation"] = (uint)((ESP.getFreeHeap() - ESP.getMaxAllocHeap()) / (double)ESP.getFreeHeap() * 100);
+    json["memoryTotal"] = ESP.getHeapSize();
+    json["lowestMemory"] = ESP.getMinFreeHeap();
+    json["filesystemUsed"] = LittleFS.usedBytes();
+    json["filesystemTotal"] = LittleFS.totalBytes();
+    json["maxPathLength"] = 31;
 #endif
+    json["memoryFree"] = ESP.getFreeHeap();
+    json["frequency"] = ESP.getCpuFreqMHz();
     json["transparencyBuffer"] = displayBuffer.isAllocated();
     json["platform"] = BOARD_NAME;
     json["width"] = DISPLAY_WIDTH;
@@ -1257,7 +1272,17 @@ void drawTextWidget(Adafruit_GFX &d, Widget &widget) {
 #endif
 }
 
-bool sendGetRequest(std::string url, std::string auth, uint16_t timeout, bool json, std::string &result) {
+bool sendGetRequest2(std::string &url, std::string &auth, uint16_t timeout, bool json, std::string &cert, std::string &result) {
+    HTTPClient httpClient;
+    Serial.println(cert.c_str());
+    httpClient.begin(url.c_str(), cert.length() == 0 ? NULL : cert.c_str());
+    httpClient.GET();
+    Serial.println(httpClient.getString());
+    httpClient.end();
+    return false;
+}
+
+bool sendGetRequest(std::string url, std::string auth, uint16_t timeout, bool json, std::string &cert, std::string &result) {
     if (!String(url.c_str()).startsWith(F("http"))) {
         Serial.println("Invalid GET protocol");
         return false;
@@ -1286,11 +1311,16 @@ bool sendGetRequest(std::string url, std::string auth, uint16_t timeout, bool js
 #endif
     WiFiClient* client = clientPtr.get();
     if (ssl) {
-        // Impossible to send requests without limiting buffer sizes, though this may cause issues receiving responses if server doesn't support MFLN
-#ifdef ESP8266
         WiFiClientSecure* secureClient = (WiFiClientSecure*)client;
-        secureClient->setInsecure();
+#ifdef ESP8266
+        if (cert.size() == 0)
+            secureClient->setInsecure();
+        else // Todo: Test ESP8266 certificate handling
+            secureClient->setCACert((const uint8_t*)cert.c_str(), cert.size());
+        // Impossible to send requests without limiting buffer sizes, though this may cause issues receiving responses if server doesn't support MFLN
         secureClient->setBufferSizes(HTTPS_RECEIVE_BUFFER, HTTPS_TRANSMIT_BUFFER);
+#else
+        secureClient->setCACert(cert.c_str());
 #endif
     }
     client->flush();
@@ -1381,7 +1411,7 @@ void ensureTetrisAllocated(Widget &widget) {
 
 void updateTextGETWidgetJson(Widget &widget) {
     std::string data;
-    if (!sendGetRequest(widget.source, widget.auth, widget.length, true, data))
+    if (!sendGetRequest(widget.source, widget.auth, widget.length, true, widget.cert, data))
         return;
 
     DynamicJsonDocument doc(JSON_REQUEST_BUFFER_SIZE);
@@ -1422,7 +1452,7 @@ void updateTextGETWidgetJson(Widget &widget) {
 
 void updateTextGETWidget(Widget &widget) {
     std::string data;
-    if (!sendGetRequest(widget.source, widget.auth, widget.length, false, data))
+    if (!sendGetRequest(widget.source, widget.auth, widget.length, false, widget.cert, data))
         return;
     String s = String(data.c_str());
     if (widget.font >= FONT_GFX)

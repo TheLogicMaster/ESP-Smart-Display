@@ -74,16 +74,16 @@ export default {
           this.error('Error', 'A binary file is required')
           return
         }
-        if (!this.binary.name.endsWith('.bin') && !(await this.confirmAsync('Update Binary', 'Are you sure you want to proceed? This does not appear to be an update file')))
+        if (!this.binary.name.endsWith('.bin') && !(await this.confirm('Update Binary', 'Are you sure you want to proceed? This does not appear to be an update file')))
           return
       } else {
         try {
           await this.waitForPromiseSuccess(this.getStats)
           if (this.selected === 'firmware') {
-            if (this.$store.state.latestVersion === this.$store.state.stats.version && !(await this.confirmAsync('Update Firmware', 'It looks like your firmware is up to date, update anyway?')))
+            if (this.$store.state.latestVersion === this.$store.state.stats.version && !(await this.confirm('Update Firmware', 'It looks like your firmware is up to date, update anyway?')))
               return
           } else {
-            if (this.$store.state.latestVersion === this.$dashboardVersion && !(await this.confirmAsync('Update Dashboard', 'It looks like your dashboard is up to date, update anyway?')))
+            if (this.$store.state.latestVersion === this.$dashboardVersion && !(await this.confirm('Update Dashboard', 'It looks like your dashboard is up to date, update anyway?')))
               return
           }
           let assets = (await this.$axios.get(`https://api.github.com/repos/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest`)).data.assets
@@ -145,7 +145,7 @@ export default {
     }
   },
   async beforeRouteLeave(to, from, next) {
-    if (this.progress < 0 || await this.confirmAsync('Danger', 'Are you really sure you want to leave during an update? This might corrupt the display firmware.'))
+    if (this.progress < 0 || await this.confirm('Danger', 'Are you really sure you want to leave during an update? This might corrupt the display firmware.'))
       next()
     else
       next(false)

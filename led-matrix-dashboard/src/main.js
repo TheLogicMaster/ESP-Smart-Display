@@ -166,7 +166,7 @@ Vue.mixin({
     setBackdrop(show) {
       store.commit('set', ['backdrop', show])
     },
-    async confirmAsync(title, content) {
+    async confirm(title, content) {
       let finished = false
       let confirmed = false
       let finish = canceled => {
@@ -201,7 +201,7 @@ Vue.mixin({
       return confirmed
     },
     async confirmNavigation(next, title, content) {
-      if(await this.confirmAsync(title, content))
+      if(await this.confirm(title, content))
         next()
       else
         next(false)
@@ -529,7 +529,8 @@ Vue.mixin({
         contentType: 0,
         auth: '',
         args: [],
-        colors: []
+        colors: [],
+        cert: ''
       }
     },
     createDefaultWidget(type) {
@@ -605,7 +606,9 @@ Vue.mixin({
           height: 32,
           vcc: 65535,
           brightness: 100,
-          brightnessSensor: 800
+          brightnessSensor: 800,
+          platform: 'nodemcuv2',
+          frequency: 80
         }])
         return true
       }

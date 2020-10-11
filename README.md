@@ -25,17 +25,18 @@ is provided in place of the normal display API calls. Aside from configuration a
 be fully functional.
 
 ## Hardware
-Currently, only ESP8266 is fully supported, but ESP32 support is in progress. 4MB of RAM is required to use both the web dashboard
+ESP32 and ESP8266 are now fully supported, though the sunrise/weather features aren't availible to ESP32 yet, since the 
+WeatherStation library isn't ESP32 friendly at the moment. 4MB of RAM is required to use both the web dashboard
 and OTA updates. This was developed primarily on a P3 32x64 panel, but other sizes should be supported. Wiring is required to
-be like [this](https://www.instructables.com/id/Morphing-Digital-Clock/). A photoresistor/resistor is supported on pin 
+be like [this](https://github.com/2dom/PxMatrix#set-up-and-cabling). A photoresistor/resistor is supported on pin 
 A0 in [this](https://www.instructables.com/id/NodeMCU-With-LDR/) configuration to control the display brightness. There 
-are pre-configured Platformio environments for Wemos D1 Mini, NodeMCU V2, and the Wemos D1 Mini Lite. Pre-built update
+are pre-configured Platformio environments for Wemos D1 Mini, NodeMCU V2, NodeMCU 32S, and the Wemos D1 Mini Lite. Pre-built update
 binaries are availible for D1 Mini and NodeMCU V2. The D1 Mini Lite has 1MB of flash memory, so OTA updates are not 
 supported and features like HTTPS and built-in images are disabled.
 
 ## Installation
-The full release binaries can be flashed using [esptool](https://github.com/espressif/esptool) or a GUI version. For 
-esptool's command line interface: 
+The full release binaries can be flashed using [esptool](https://github.com/espressif/esptool) or a 
+[GUI version](https://github.com/Rodmg/esptool-gui). For esptool's command line interface: 
 ```shell script
 # Example command for NodeMCU V2
 esptool --port /dev/ttyUSB0 write_flash -fm dio 0x00000 nodemcuv2-32x64-v0.bin
@@ -43,10 +44,11 @@ esptool --port /dev/ttyUSB0 write_flash -fm dio 0x00000 nodemcuv2-32x64-v0.bin
 Alternatively, you can use Platformio or Arduino
 IDE after downloading the latest [release](https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest) 
 source code.
-The flash memory split for the program and filesystem is 50/50 for a 4MB board, where 1MB is for the program, 1MB is for
-firmware OTA updates, and 2MB is for the LittleFS filesystem. For platformio, this means the `eagle.flash.4m2m.ld` ld
+The flash memory split for the program and filesystem is 1 to 1 to 2 for a 4MB board, where 1MB is for the program, 1MB is for
+firmware OTA updates, and 2MB is for the LittleFS filesystem. For ESP8266 with platformio, this means the `eagle.flash.4m2m.ld` ld
 script. For Arduino IDE, use the `4MB (FS: 2MB)` flashing option. For 1MB boards, Platformio is probably required, as it
-doesn't look like Arduino IDE has an option to not use flash for OTA. 
+doesn't look like Arduino IDE has an option to not use flash for OTA. For ESP32, a custom partition file is needed if your
+board's default flash layout doesn't suit your needs. 
 
 ### Building the Web Dashboard
 Manually compiling the firmware and building the dashboard is only required if not flashing one of the pre-built full 
@@ -71,9 +73,8 @@ To use Arduino IDE, the following libraries must be installed through the librar
 * [AsyncTCP](https://github.com/me-no-dev/AsyncTCP) (If using ESP8266, manually install)
 * [ESPAsyncWebServer](https://github.com/me-no-dev/ESPAsyncWebServer) (Manually install)
 * ArduinoJson
-* Time
+* ezTime
 * WeatherStation (And dependencies if using ESP8266 and Weather)
-* Timezone
 * RunningAverage (If using brightness sensor "rolling" average)
 * TetrisAnimation (If using Tetris font)
 
@@ -83,32 +84,35 @@ The [ESP8266 FS plugin](https://github.com/earlephilhower/arduino-esp8266littlef
 is also needed to upload the web interface. Select the correct board and flash split for your board. First upload the
 code to the board, then select *FS Data Upload* under *Tools*. 
 
+If using ESP32, add boards using [this](https://github.com/espressif/arduino-esp32/blob/master/docs/arduino-ide/boards_manager.md)
+and use the FS plugin from [here](https://github.com/me-no-dev/arduino-esp32fs-plugin). 
+
 Due to Platformio compilation issue when using .INO files directly, the *main.cpp* must be renamed to *led-matrix-display.ino*
 before opening the project in Arduino IDE. All board specific definitions in *platformio.ini* must be changed in the new .INO file
 if your board isn't a NodeMCU V2.
 
 ### Platformio
 To use [Platformio](https://docs.platformio.org/), install it and configure platformio.ini to suit the display size and
-ESP8266 flash layout. If you are using one of the boards with an existing environment, just use that one, especially
+ESP flash layout. If you are using one of the boards with a pre-configured environment, just use that one, especially
 since that will enable easy OTA updates using release binaries rather than manually compiling and flashing new ones. 
 Build and upload to the board. There seems to be an issue using .ino files with platformio which necessitates running 
 the upload task twice. Then run the *Upload Filesystem Image* task.
 
 ### Initial Setup
-This project uses [WifiManager](https://github.com/tzapu/WiFiManager) to handle WiFi configuration. After successfully
+This project uses [ESPAsyncWiFiManager](https://github.com/alanswx/ESPAsyncWiFiManager) to handle WiFi configuration. After successfully
 connecting to a network using the created access point, the display's IP will be shown. The configuration server is
 hosted on port 80, so enter the address in any browser. After saving any configuration from the *Display* page, the 
-display will update and show the new content. [DoubleResetDetector](https://github.com/datacute/DoubleResetDetector) 
+display will update and show the new content. [ESP_DoubleResetDetector](https://github.com/khoih-prog/ESP_DoubleResetDetector) 
 is used to detect two restarts within ten seconds of each other, at which point the WiFi configuration AP will start
 again. The configuration screen is always displayed after setting up the WiFi connection, if you want to determine
 the display's IP. Static IP configuration is not available yet. If the display isn't displaying correctly after flashing
 the firmware, the default PxMatrix parameters may be incorrect for your display. In this case, either determine the IP
 of the display using a serial monitor with baud rate 115200 or your router. Once connected to the display dashboard,
-try changing the mux and scan patterns under *Settings*. If this doesn't fix it, the wiring may be incorrect or the 
+try changing the mux and scan patterns under *Settings*. If this doesn't fix it, the wiring may be incorrect, or the 
 firmware wasn't correct for your board, causing incorrect pin assignments. 
 
 ## Web Dashboard
-Vue is used to create a SPA webpage that is hosted on the ESP8266. All files are compressed and it takes up about
+Vue is used to create a SPA webpage that is hosted on the display. All files are compressed and it takes up about
 500KB of the filesystem. The first time loading the interface takes a while, but after that the files should be cached
 until the dashboard is updated. All of the resource intensive processes like image conversion take place in the browser
 to leave only rendering to the display. The dashboard should be fully functional on either mobile or desktop 
@@ -116,10 +120,17 @@ environments, but the mobile part is not seamless yet. The interface is broken u
 functions. The sidebar handles navigation between pages, and the page names should be pretty self-explanatory.
 
 ## OTA Updates
+
+![OTA Update](/media/backup_and_restore.png?raw=true "OTA Update")
 OTA Updates are as simple as downloading the newest release binary that matches your board configuration and selecting
 it from the *OTA Update* page of the dashboard. Alternatively if you have a non-stock configuration, pull the repo
 changes and build and deploy the dashboard and firmware again. The dashboard can also automatically download and flash
 the latest binaries if you are using a stock configuration. 
+
+![Backup and Restore](/media/backup_and_restore.png?raw=true "Backup and Restore")
+Ensure that you download a backup of the configuration before updating, otherwise all configuration settings and custom
+images will be lost. This can be done in the *Backup* page. After updating, simply upload your backup and everything should
+be restored. 
 
 ## Configuration
 The display configuration is entirely based on a JSON configuration file stored in the display filesystem. This is
@@ -215,7 +226,7 @@ exported from the dashboard. The 565 format uses half the space that the Gimp fo
 included images can also be removed in this way.
 
 ## Credits
-* Small font and weather animations are repurposed from 
+* Tiny font and weather animations are repurposed from 
 [MorphingClockRemix](https://github.com/lmirel/MorphingClockRemix)
 * BLM and Mario images are from [PxMatrix](https://github.com/2dom/PxMatrix)
 * Gimp header format information is from 
