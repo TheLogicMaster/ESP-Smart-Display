@@ -68,7 +68,7 @@
           </md-list-item>
           <md-list-item class="md-layout md-gutter md-alignment-center-center">
             <b class="md-list-item stat-name"> CPU Frequency </b>
-            <div class="md-list-item stat-value"> {{ this.$store.state.stats['lowestMemory'] }} MHz</div>
+            <div class="md-list-item stat-value"> {{ this.$store.state.stats['frequency'] }} MHz</div>
           </md-list-item>
           <md-list-item class="md-layout md-gutter md-alignment-center-center">
             <b class="md-list-item stat-name"> Transparency Buffer </b>

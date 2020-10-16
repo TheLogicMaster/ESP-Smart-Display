@@ -90,7 +90,8 @@ Vue.prototype.$widgetNames = [
   'Text',
   'JSON GET Text',
   'GET Plain-text',
-  'Weather Icon'
+  'Weather Icon',
+  'Geometric Shape'
 ]
 
 const UNIQUE_KEY_PROP = '__unique_key_prop__'
@@ -498,6 +499,14 @@ Vue.mixin({
         case 6: // GET Plaintext
           size = {width: widget.large ? 6 : 4, height: widget.large ? 7 : 5}
           break
+        case 8: // Shape
+          if (widget.contentType === 2)
+            size = {width: 3, height: 3}
+          else if (widget.contentType === 3)
+            size = {width: 1, height: 1}
+          else
+            size = {width: 2, height: 2}
+          break;
         default:
           let stock = this.createDefaultWidget(widget.type)
           size = {width: stock.width, height: stock.height}
@@ -563,6 +572,7 @@ Vue.mixin({
           widget.height = 5
           widget.content = 'TEXT'
           widget.colors = ['0x00FF00']
+          widget.background = true
           break
         case 5: // GET JSON
           widget.width = 29
@@ -573,11 +583,6 @@ Vue.mixin({
           widget.length = 3000
           widget.colors = ['0x00FF00']
           break
-        case 7: // Weather Icon
-          widget.width = 10
-          widget.height = 5
-          widget.frequency = 1000
-          break
         case 6: // GET Plain-text
           widget.width = 29
           widget.height = 5
@@ -585,6 +590,17 @@ Vue.mixin({
           widget.source = ''
           widget.length = 3000
           widget.colors = ['0x00FF00']
+          break
+        case 7: // Weather Icon
+          widget.width = 10
+          widget.height = 5
+          widget.frequency = 1000
+          break
+        case 8: // Shape
+          widget.width = 10
+          widget.height = 10
+          widget.background = true
+          widget.colors = ['0x0000FF']
           break
       }
       return widget
@@ -597,6 +613,7 @@ Vue.mixin({
           version: 0,
           fragmentation: 15,
           memoryFree: 17920,
+          memoryTotal: 80000,
           transparencyBuffer: true,
           filesystemUsed: 614400,
           filesystemTotal: 2070000,
@@ -646,6 +663,7 @@ Vue.mixin({
     bloatConfig(config) {
       config.backgroundColor = config.backgroundColor || '0x000000'
       config.metric = config.metric || false
+      config.vertical = config.vertical || false
       config.timezone = config.timezone || 'America/Detroit'
       config.weatherLocation = config.weatherLocation || ''
       config.weatherKey = config.weatherKey || ''

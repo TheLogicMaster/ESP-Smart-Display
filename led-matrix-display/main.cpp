@@ -28,17 +28,21 @@
 #define CLOCK_TYPE_24 0
 #define CLOCK_TYPE_12 1
 #define CLOCK_TYPE_12_PERIOD 2
+#define SHAPE_RECTANGLE 0
+#define SHAPE_RECTANGLE_ROUNDED 1
+#define SHAPE_CIRCLE 2
+#define SHAPE_PIXEL 3
 #define STATE_NORMAL 0
 #define STATE_UPDATING 1
 
 // Configuration
+#define ROUNDED_RECT_RADIUS 3 // The radius to use for rounded rectangles
 #define MAX_CONFIG_FILE_SIZE 3000 // Max config file size in flash
 #define CONFIG_JSON_BUFFER_SIZE 5000 // The buffer for configuration file parsing
 #define JSON_REQUEST_BUFFER_SIZE 2000 // The JSON buffer for parsing JSON GET requests
 #define MAX_IMAGE_DATA_FILE_SIZE 2000 // The maximum size for the image data file
 #define IMAGE_JSON_BUFFER_SIZE 2500 // The buffer size for image data, increase if not seeing all uploaded images
 #define WEATHER_UPDATE_INTERVAL 3600000 // Every Hour update the weather if using any weather widgets
-#define NTP_UPDATE_INTERVAL 3700000 // Just over every hour to avoid large update delays
 #define PIXEL_YIELD_THRESHOLD 100 // Might not be necisary, yields while drawign images larger than 10 by 10
 #define BRIGHTNESS_UPDATE_INTERVAL 10 // Millis between brightness increments
 #define SUN_UPDATE_INTERVAL 7200000 // Every 2 hours, since sun won't rise within 2 hours of date change
@@ -46,6 +50,7 @@
 #define BRIGHTNESS_ROLLING_AVG_SIZE 10 // Higher value makes transition smoother, 4 bytes per buffer value, zero for no buffer
 #define HTTPS_TRANSMIT_BUFFER 512 // Limit HTTPS buffers to prevent HTTPS GET requests all failing
 #define HTTPS_RECEIVE_BUFFER 1024
+#define ALPHA_COLOR_DISTANCE 27 // The squared distance between image alpha colors and pixel colors to count as transparent, to account for conversion errors
 
 // Configuration Values
 #ifndef USE_BRIGHTNESS_SENSOR
@@ -106,10 +111,16 @@
 #ifndef DISPLAY_ROW_PATTERN
 #define DISPLAY_ROW_PATTERN 16 // The row pattern for the display
 #endif
+#ifndef DEBUGGING
+#define DEBUGGING false
+#endif
+#ifndef DEBUG_TRANSPARENCY
+#define DEBUG_TRANSPARENCY false // Save the transparency buffer as an read-only image
+#endif
 #if ENABLE_ARDUINO_OTA
 #include <ArduinoOTA.h>
 #endif
-#ifdef DEBUGGING
+#if DEBUGGING
 #define DEBUG(fmt, ...)  Serial.printf_P((PGM_P)PSTR( "DEBUG: " fmt), ## __VA_ARGS__)
 #else
 #define DEBUG(...)
@@ -124,8 +135,6 @@
 #include <esp_wifi.h>
 #include <FS.h>
 #include <SPIFFS.h>
-//#include <LITTLEFS.h>
-//#define LittleFS LITTLEFS
 #define LittleFS SPIFFS
 #define Dir File
 #include <WiFi.h>
@@ -146,9 +155,9 @@
 #include <AsyncJson.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
+#define ESP_DRD_USE_EEPROM true
 #include <ESP_DoubleResetDetector.h>
 #include <DNSServer.h>
-//#include <ESP_WiFiManager.h>
 #include <ESPAsyncWiFiManager.h>
 #if USE_NTP
 #include <ezTime.h>
@@ -170,7 +179,6 @@
 
 // Images
 #if USE_PROGMEM_IMAGES
-#include "BLM.h"
 #include "Taz.h"
 #include "Mario.h"
 #include "Youtube.h"
@@ -250,80 +258,54 @@ const uint16_t WHITE = display.color565(255, 255, 255);
 const uint16_t YELLOW = display.color565(255, 255, 0);
 const uint16_t CYAN = display.color565(0, 255, 255);
 const uint16_t MAGENTA = display.color565(255, 0, 255);
-const uint16_t BLACK = display.color565(0, 0, 0);
+
+struct rgbColor {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+};
 
 class DisplayBuffer : public Adafruit_GFX {
-    struct coords {
-        int16_t x;
-        int16_t y;
-    };
-    bool rotate;
-    bool flip;
+    bool _rotate;
     std::unique_ptr <uint16_t> buffer;
 
 public:
-    DisplayBuffer(uint8_t width, uint8_t height) : Adafruit_GFX(width, height) {
-        rotate = false;
-        flip = false;
+    DisplayBuffer() : Adafruit_GFX(DISPLAY_WIDTH, DISPLAY_HEIGHT) {
+        _rotate = false;
     }
 
     void setRotate(bool rotate) {
-        this->rotate = rotate;
-    }
-
-    void setFlip(bool flip) {
-        this->flip = flip;
-    }
-
-    coords transformCoords(int16_t x, int16_t y) {
-        if (rotate) {
-            int16_t temp_x = x;
-            x = y;
-            y = _height - 1 - temp_x;
-        }
-        // Todo: Verify transformations are correct
-        if (flip)
-            x = _width - 1 - x;
-
-        if ((x < 0) || (x >= _width) || (y < 0) || (y >= _height)) {
-            DEBUG("DisplayBuffer: Transformed coordinates out of range: (%i, %i)\n", x, y);
-            yield();
-            return coords{0, 0};
-        }
-        return coords{x, y};
+        _rotate = rotate;
     }
 
     void drawPixel(int16_t x, int16_t y, uint16_t color) {
-        if (!buffer) {
-            DEBUG("DisplayBuffer: Buffer is not allocated");
+        if (y * _width + x >= _width * _height || !buffer) 
             return;
-        }
-        //Serial.printf("Coordinates: (%i, %i)\n", x, y);
-        coords c = transformCoords(x, y);
-        if (c.y * _width + c.x >= _width * _height) {
-            DEBUG("DisplayBuffer: index out of range");
-            return;
-        }
-        buffer.get()[c.y * _width + c.x] = color;
+        buffer.get()[y * _width + x] = color;
     }
 
     void write(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, uint8_t height) {
-        if (!buffer) {
-            DEBUG("DisplayBuffer: Buffer is  not allocated");
-            return;
-        }
-
         for (uint8_t x = xOff; x < xOff + width; x++) {
             for (uint8_t y = yOff; y < yOff + height; y++) {
-                if (y * _width + x >= _width * _height) {
-                    DEBUG("DisplayBuffer: index out of range");
+                if (y * _width + x >= _width * _height || !buffer) 
                     return;
-                }
                 display.drawPixel(x, y, buffer.get()[y * _width + x]);
             }
-            if (width * height > PIXEL_YIELD_THRESHOLD)
-                yield();
+#if defined(ESP8266)
+        if (width * height > PIXEL_YIELD_THRESHOLD)
+            yield();
+#endif
         }
+    }
+
+    uint16_t getPixel(uint8_t x, uint8_t y) {
+        if (y * _width + x >= _width * _height || !buffer) 
+            return 0;
+        return buffer.get()[y * _width + x];
+    }
+
+    uint16_t* getBuffer() {
+        return buffer.get();
     }
 
     bool isAllocated() {
@@ -332,7 +314,7 @@ public:
 
     bool allocate() {
         DEBUG("Allocating display buffer...\n");
-        buffer.reset(new uint16_t[_width * _height]);
+        buffer.reset(new uint16_t[_width * _height] {0});
         if (!buffer) {
             Serial.println(F("Failed to allocate display buffer"));
             return false;
@@ -349,7 +331,6 @@ public:
 std::map <std::string, ProgmemImage> progmemImages = {
 #if USE_PROGMEM_IMAGES
                                                      {"taz",  {23, 28, 1,  IMAGE_UINT16, taz}},
-                                                     //{"blm",  {64, 32, 36, IMAGE_UINT8,  blmAnimations}},
                                                      {"mario",  {64, 32, 1, IMAGE_UINT16,  mario}},
                                                      {"youtube", {21, 16, 1, IMAGE_UINT16, youtube}}
 #endif
@@ -371,6 +352,7 @@ bool usingWeather;
 bool usingTransparency;
 bool metric;
 bool fastUpdate;
+bool vertical;
 String weatherKey;
 String weatherLocation;
 bool usingSunMoon;
@@ -416,7 +398,7 @@ Timezone timezone;
 #if USE_WEATHER
 OpenWeatherMapForecast weatherClient;
 #endif
-DisplayBuffer displayBuffer(DISPLAY_WIDTH, DISPLAY_HEIGHT);
+DisplayBuffer displayBuffer;
 
 #if !USE_BRIGHTNESS_SENSOR
 ADC_MODE(ADC_VCC);
@@ -448,7 +430,7 @@ void closeFiles() {
         widgets[i].file.close();
 }
 
-bool parseConfig(JsonVariant& json, String& errorString) {
+bool parseConfig(JsonVariant& json, bool newConfig, String& errorString) {
     if (!json) {
         errorString.concat("Invalid Config");
         return false;
@@ -459,6 +441,7 @@ bool parseConfig(JsonVariant& json, String& errorString) {
     String tempWeatherLocation = json["weatherLocation"].isNull() ? "" : String(
             json["weatherLocation"].as<char *>());
     bool tempMetric = json["metric"];
+    bool tempVertical = json["vertical"];
     bool tempTransparency = false;
     bool tempFastUpdate = json["fastUpdate"];
     String tempTimezone = json["timezone"].isNull() ? "America/Detroit" : String(json["timezone"].as<char *>());
@@ -547,20 +530,24 @@ bool parseConfig(JsonVariant& json, String& errorString) {
                                    widget["xOff"], widget["yOff"], widget["width"], widget["height"],
                                    widget["frequency"], widget["offset"], widget["length"], colors,
                                    widget["font"],
-                                   widget["bordered"], widget["borderColor"].isNull() ? 0 : parseHexColorString(
-                            widget["borderColor"].as<char *>()),
+                                   widget["bordered"], widget["borderColor"].isNull() ? (uint16_t)0 : parseHexColorString(
+                                   widget["borderColor"].as<char *>()),
                                    widget["transparent"],
-                                   widget["backgroundColor"].isNull() ? 0 : parseHexColorString(
-                                           widget["backgroundColor"].as<char *>()), widget["background"]});
+                                   widget["backgroundColor"].isNull() ? (uint16_t)0 : parseHexColorString(
+                                   widget["backgroundColor"].as<char *>()), widget["background"]});
         }
         std::sort(tempWidgets.begin(), tempWidgets.end(), [](Widget w1, Widget w2) { return w1.id < w2.id; });
     }
 
     // Only load new configuration after successful completion of config parsing
 #if USE_NTP
-    if (!timezone.setLocation(tempTimezone)) {
-        errorString.concat(F("Failed to set timezone"));
-        return false;
+    for (uint i = 0; i < 3 && newConfig; i++) {
+        if (timezone.setLocation(tempTimezone)) 
+            break;
+        if (i == 2) {
+            errorString.concat(F("Failed to set timezone"));
+            return false;
+        }
     }
 #endif
 
@@ -572,6 +559,7 @@ bool parseConfig(JsonVariant& json, String& errorString) {
     needsUpdate = true;
     needsConfig = false;
     widgets = tempWidgets;
+    vertical = tempVertical;
     brightnessDim = tempBrightnessDim;
     brightnessMode = tempBrightnessMode;
     brightnessBright = tempBrightnessBright;
@@ -599,6 +587,10 @@ bool parseConfig(JsonVariant& json, String& errorString) {
     display.setMuxPattern(static_cast<mux_patterns>(muxPattern));
     display.setScanPattern(static_cast<scan_patterns>(scanPattern));
     display.setMuxDelay(muxDelay, muxDelay, muxDelay, muxDelay, muxDelay);
+    display.setRotate(vertical);
+    display.setRotation(vertical);
+    displayBuffer.setRotate(vertical);
+    displayBuffer.setRotation(vertical);
 
     weatherUpdateTime = 0;
     sunMoonTime = 0;
@@ -638,7 +630,7 @@ bool getConfig() {
     
     String error;
     JsonVariant json = doc.as<JsonVariant>();
-    if (!parseConfig(json, error)) {
+    if (!parseConfig(json, false, error)) {
         Serial.printf("Failed to parse config: %s\n, replacing with default...\n", error.c_str());
         writeDefaultConfig();
         return false;
@@ -717,25 +709,26 @@ void serveRoot(AsyncWebServerRequest *request) {
   <body>
   <strong>Dashboard is not installed</strong>
   <a href="https://github.com/TheLogicMaster/ESP-LED-Matrix-Display">Get Dashboard</a>
+  <a href="/recovery">Install Dashboard</a>
   </body>
   </html>
 )=====");
 }
 
 void serveSaveConfig(AsyncWebServerRequest *request, JsonVariant &json) {
-    DEBUG("SAVE CONFIG");
-    if (displayBuffer.isAllocated())
-            displayBuffer.close();
-        for (uint i = 0; i < widgets.size(); i++) {
-            widgets[i].file.close();
+    // Todo: Ensure not closed while rendering or crash
+    //if (displayBuffer.isAllocated())
+    //    displayBuffer.close();
+    for (uint i = 0; i < widgets.size(); i++) {
+        widgets[i].file.close();
 #if USE_TETRIS
-            widgets[i].tetris.reset();
+        widgets[i].tetris.reset();
 #endif
-        }
+    }
         needsUpdate = true;
 
         String error;
-        if (parseConfig(json, error)) {
+        if (parseConfig(json, true, error)) {
             LittleFS.remove("/config.json");
             File file = LittleFS.open("/config.json", "w");
             serializeJson(json, file);
@@ -838,8 +831,8 @@ void serveStats(AsyncWebServerRequest *request) {
     json["frequency"] = ESP.getCpuFreqMHz();
     json["transparencyBuffer"] = displayBuffer.isAllocated();
     json["platform"] = BOARD_NAME;
-    json["width"] = DISPLAY_WIDTH;
-    json["height"] = DISPLAY_HEIGHT;
+    json["width"] = vertical ? DISPLAY_HEIGHT : DISPLAY_WIDTH;
+    json["height"] = vertical ? DISPLAY_WIDTH : DISPLAY_HEIGHT;
     json["brightness"] = currentBrightness;
     json["brightnessSensor"] = analogRead(BRIGHTNESS_SENSOR_PIN);
     response->setLength();
@@ -919,6 +912,17 @@ void serveImageData(AsyncWebServerRequest *request) {
     size_t size = 100 + (progmemImages.size() + fsImageData.size()) * 100;
     DynamicJsonDocument doc(size);
 
+#if DEBUG_TRANSPARENCY
+    {
+        JsonObject o = doc.createNestedObject("Transparency Buffer");
+        o["width"] = DISPLAY_WIDTH;
+        o["height"] = DISPLAY_HEIGHT;
+        o["length"] = 1;
+        o["type"] = IMAGE_UINT8;
+        o["progmem"] = false;
+    }
+#endif
+
     for (auto const &entry : progmemImages) {
         JsonObject o = doc.createNestedObject(entry.first.c_str());
         o["width"] = entry.second.width;
@@ -959,9 +963,9 @@ void serveUploadImage(AsyncWebServerRequest *request, String filename, size_t in
     if (final) {
         if (request->_tempFile) {
             std::map <std::string, FSImage> fsImageData = getFSImageData();
-            fsImageData[request->arg(F("name")).c_str()] = {strtoul(request->arg(F("width")).c_str(), NULL, 10),
-                                                        strtoul(request->arg(F("height")).c_str(), NULL, 10),
-                                                        strtoul(request->arg(F("length")).c_str(), NULL, 10)};
+            fsImageData[request->arg(F("name")).c_str()] = {(uint8_t)strtoul(request->arg(F("width")).c_str(), NULL, 10),
+                                                        (uint8_t)strtoul(request->arg(F("height")).c_str(), NULL, 10),
+                                                        (uint8_t)strtoul(request->arg(F("length")).c_str(), NULL, 10)};
             writeFSImageData(fsImageData);
             needsUpdate = true;
         } else {
@@ -1076,15 +1080,17 @@ void serveOTAUpload(AsyncWebServerRequest *request, String filename, size_t inde
 #ifdef ESP8266
         Update.runAsync(true);
 #endif
-        if (filename.equals("firmware")) {
+        if (filename.startsWith("firmware")) {
+            Serial.println("Starting Firmware update");
             if(!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000))
                 Update.printError(Serial);
         } else {
+            Serial.println("Starting Filesystem update");
             LittleFS.end();
 #ifdef ESP8266
             if (!Update.begin((size_t) &_FS_end - (size_t) &_FS_start, U_FS))
 #else
-            if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH))
+            if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS))
 #endif
                 Update.printError(Serial);
         }
@@ -1099,12 +1105,38 @@ void serveOTAUpload(AsyncWebServerRequest *request, String filename, size_t inde
     }
 }
 
+static char recoveryIndex[] PROGMEM = R"(<!DOCTYPE html>
+     <html lang='en'>
+     <head>
+         <meta charset='utf-8'>
+         <meta name='viewport' content='width=device-width,initial-scale=1'/>
+     </head>
+     <body>
+     <h1>Display Recovery</h1>
+     <form method='POST' action='/update' enctype='multipart/form-data'>
+         Firmware:<br>
+         <input type='file' accept='.bin,.bin.gz' name='firmware'>
+         <input type='submit' value='Install Firmware'>
+     </form>
+     <form method='POST' action='/update' enctype='multipart/form-data'>
+         Dashboard:<br>
+         <input type='file' accept='.bin,.bin.gz' name='filesystem'>
+         <input type='submit' value='Install Dashboard'>
+     </form>
+     </body>
+     </html>)";
+
+void serveRecovery(AsyncWebServerRequest *request) {
+    request->send_P(200, F("text/html"), recoveryIndex);
+}
+
 void setupWebserver() {
     server.on("/", serveRoot);
     server.on("/index.html", serveRoot);
     server.on("/config", HTTP_GET, serveConfig);
     server.addHandler(new AsyncCallbackJsonWebHandler("/config", serveSaveConfig, MAX_CONFIG_FILE_SIZE));
     server.on("/update", HTTP_POST, serveOTA, serveOTAUpload);
+    server.on("/recovery", HTTP_GET, serveRecovery);
     server.on("/abortUpdate", abortOTA);
     server.on("/beginUpdate", startOTA);
     server.on("/fullRefresh", serveFullUpdate);
@@ -1128,10 +1160,23 @@ void setupWebserver() {
 
 #pragma region Rendering
 
+rgbColor unpack565Color(uint16_t color) {
+    return {
+        (uint8_t)((color & 0xF800) >> 11), 
+        (uint8_t)((color & 0x7E0) >> 5), 
+        (uint8_t)(color & 0x1F)
+    };
+}
+
 bool checkAlphaColors(std::vector<uint16_t> alphaColors, uint16_t color) {
-    for (uint i = 0; i < alphaColors.size(); i++)
+    for (uint i = 0; i < alphaColors.size(); i++) {
         if (alphaColors[i] == color)
             return true;
+        rgbColor c0 = unpack565Color(alphaColors[i]);
+        rgbColor c1 = unpack565Color(color);
+        if (pow(c0.r - c1.r, 2) + pow(c0.g - c1.g, 2) + pow(c0.b - c1.b, 2) < ALPHA_COLOR_DISTANCE)
+            return true;
+    }
     return false;
 }
 
@@ -1145,8 +1190,10 @@ void drawImage(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width,
                 continue;
             d.drawPixel(xOffset + x, yOffset + y, line_buffer[x]);
         }
+#if defined(ESP8266)
         if (width * height > PIXEL_YIELD_THRESHOLD)
             yield();
+#endif
     }
 }
 
@@ -1176,8 +1223,10 @@ void drawImageFs(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t widt
                 continue;
             d.drawPixel(xOffset + x, yOffset + y, color);
         }
+#if defined(ESP8266)
         if (width * height > PIXEL_YIELD_THRESHOLD)
             yield();
+#endif
     }
 }
 
@@ -1198,8 +1247,10 @@ drawGimpImage(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, 
                 continue;
             display.drawPixel(x + xOff, y + yOff, color);
         }
+#if defined(ESP8266)
         if (width * height > PIXEL_YIELD_THRESHOLD)
             yield();
+#endif
     }
 }
 
@@ -1331,7 +1382,9 @@ bool sendGetRequest(std::string url, std::string auth, uint16_t timeout, bool js
         return false;
     }
 
-    yield();
+    #if defined(ESP8266)
+        yield();
+    #endif
 
     client->print(F("GET "));
     client->print(address.substr(addressEnd).c_str());
@@ -1546,7 +1599,7 @@ void updateWidget(Widget &widget) {
 
 void updateWidgets() {
     for (uint i = 0; i < widgets.size(); i++)
-        if (widgets[i].lastUpdate == 0 || widgets[i].updateFrequency > 0 && (millis() - widgets[i].lastUpdate > widgets[i].updateFrequency))
+        if (widgets[i].lastUpdate == 0 || (widgets[i].updateFrequency > 0 && millis() - widgets[i].lastUpdate > widgets[i].updateFrequency))
             updateWidget(widgets[i]);
 }
 
@@ -1555,7 +1608,23 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
         if (widget.type == WIDGET_ANALOG_CLOCK)
             d.fillCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2,
                          widget.backgroundColor);
-        else
+        else if (widget.type == WIDGET_SHAPE) {
+            switch (widget.contentType) {
+                default:
+                    Serial.printf("Unknown shape: %i\n", widget.contentType);
+                case SHAPE_PIXEL:
+                case SHAPE_RECTANGLE:
+                    d.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.backgroundColor);
+                    break;
+                case SHAPE_RECTANGLE_ROUNDED:
+                    d.fillRoundRect(widget.xOff, widget.yOff, widget.width, widget.height, ROUNDED_RECT_RADIUS, widget.backgroundColor);
+                    break;
+                case SHAPE_CIRCLE:
+                    d.fillCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2,
+                         widget.backgroundColor);
+                    break;
+            }
+        } else
             d.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.backgroundColor);
     } else if (!buffering)
         displayBuffer.write(display, widget.xOff, widget.yOff, widget.width, widget.height);
@@ -1603,6 +1672,22 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
             TIDrawIcon(d, weatherID, widget.xOff + _max(0, (widget.width - 10 + 1) / 2), widget.yOff + (widget.height - 5) / 2, widget.state, true, widget.transparent, widget.backgroundColor);
 #endif
             break;
+        case WIDGET_SHAPE:
+            switch(widget.contentType) {
+                default:
+                case SHAPE_RECTANGLE:
+                    d.drawRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.colors[0]);
+                    break;
+                case SHAPE_RECTANGLE_ROUNDED:
+                    d.drawRoundRect(widget.xOff, widget.yOff, widget.width, widget.height, ROUNDED_RECT_RADIUS, widget.colors[0]);
+                    break;
+                case SHAPE_CIRCLE:
+                    d.drawCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2, widget.colors[0]);
+                    break;
+                case SHAPE_PIXEL:
+                    break;
+            }
+            break;
         default:
             Serial.print(F("Invalid widget type: "));
             Serial.println(widget.type);
@@ -1648,8 +1733,19 @@ void updateScreen(bool fullUpdate) {
     if (usingTransparency && fullUpdate) {
         if (!displayBuffer.isAllocated() && !displayBuffer.allocate())
             Serial.println(F("Can't draw screen on null buffer"));
-        else
+        else {
             drawScreen(displayBuffer, fullUpdate, true, false);
+#if DEBUG_TRANSPARENCY
+            File f = LittleFS.open("/images/Transparency Buffer", "w");
+            if (vertical)
+                for (uint y = 0; y < DISPLAY_HEIGHT; y++)
+                    for (uint x = 0; x < DISPLAY_WIDTH; x++) 
+                        f.write((uint8_t*)displayBuffer.getBuffer() + (x * DISPLAY_HEIGHT + DISPLAY_HEIGHT - 1 - y) * 2, 2);
+            else
+                f.write((uint8_t*)displayBuffer.getBuffer(), DISPLAY_HEIGHT * DISPLAY_WIDTH * 2);
+            f.close();
+#endif
+        }
     }
     if (USE_DOUBLE_BUFFERING) {
         drawScreen(display, fullUpdate, false, false);
@@ -1807,7 +1903,6 @@ void setup() {
     timerAlarmWrite(timer, 2000, true);
     timerAlarmEnable(timer);;
 #endif
-    //display.setBrightness(1);
     display.setPanelsWidth(DISPLAY_PANELS);
     display.fillScreen(GREEN);
     display.showBuffer();
@@ -1815,8 +1910,18 @@ void setup() {
 
     if (!LittleFS.begin()) {
         display.fillScreen(BLUE);
-        display.print("FS ERROR");
-        Serial.println("Failed to open filesystem");
+        display.println(F("FS ERROR"));
+        Serial.println(F("Failed to open filesystem"));
+        delay(3000);
+        display.fillScreen(BLUE);
+        display.setCursor(0, 0);
+        display.println(F("Formatting"));
+        display.println(F("Display..."));
+        Serial.println(F("Formatting Display"));
+        delay(3000);
+        display.fillScreen(0);
+        LittleFS.begin(true);
+        needsConfig = true;
     }
     File versionFile = LittleFS.open("/version.txt", "r");
     if (versionFile) {
@@ -1834,6 +1939,8 @@ void setup() {
         wifiManager.startConfigPortal("LED Matrix Display");
     } else {
         Serial.println(F("Attemping to connect to network..."));
+        display.fillScreen(BLUE);
+        display.setCursor(0, 0);
         display.print(F("Connecting..."));
         display.showBuffer();
         wifiManager.autoConnect("LED Matrix Display", __null, 5);
@@ -1894,7 +2001,7 @@ void loop() {
             updateScreen(needsUpdate);
             break;
         case STATE_UPDATING:
-            display.fillScreen(BLACK);
+            display.fillScreen(0);
             display.showBuffer();
             break;
     }

@@ -8,6 +8,7 @@
       </div>
       <div class="fields" v-if="config">
         <md-switch v-model="config.metric">Metric Units</md-switch>
+        <md-switch v-model="config.vertical">Vertical Orientation</md-switch>
         <md-switch v-model="config.fastUpdate">Fast Update Display</md-switch>
         <md-field>
           <label>WeatherMap API Key</label>
@@ -122,8 +123,10 @@ export default {
         await this.save()
     },
     async save() {
-      if (await this.saveConfig(this.config))
+      if (await this.saveConfig(this.config)) {
         this.info('Saved Settings', 'Successfully updated display settings.')
+        await this.getStats()
+      }
       else
         this.error('Error', 'Failed to update display settings.')
     }

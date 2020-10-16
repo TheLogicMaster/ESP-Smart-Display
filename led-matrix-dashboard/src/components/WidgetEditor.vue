@@ -9,7 +9,7 @@
       </md-field>
     </div>
     <template v-if="!collapsed">
-      <div v-if="(widget.type !== 4 && widget.type !== 2 && widget.type !== 3)">
+      <div v-if="(widget.type !== 4 && widget.type !== 2 && widget.type !== 3 && widget.type !== 8)">
         <md-checkbox v-model="dynamic" @change="changeDynamic">Dynamic</md-checkbox>
         <md-field class="layer-field field" v-if="dynamic">
           <label>Interval(ms)</label>
@@ -98,10 +98,21 @@
       <template v-else-if="widget.type === 2">
         <md-field class="field">
           <label class="label">Clock Type</label>
-          <md-select name="Text Mode" v-model="widget.contentType">
+          <md-select name="Clock Type" v-model="widget.contentType">
             <md-option :value="0"> 24 Hour </md-option>
             <md-option :value="1"> 12 Hour </md-option>
             <md-option :value="2"> 12 Hour with Period </md-option>
+          </md-select>
+        </md-field>
+      </template>
+      <template v-else-if="widget.type === 8">
+        <md-field class="field">
+          <label class="label">Shape</label>
+          <md-select name="Shape" v-model="widget.contentType" @input="changeShape">
+            <md-option :value="0"> Rectangle </md-option>
+            <md-option :value="1"> Rounded Rectangle </md-option>
+            <md-option :value="2"> Circle </md-option>
+            <md-option :value="3"> Pixel </md-option>
           </md-select>
         </md-field>
       </template>
@@ -125,7 +136,7 @@
           </md-select>
         </md-field>
       </template>
-      <div v-if="widget.type !== 0 && widget.type !== 1 && widget.type !== 3">
+      <div v-if="widget.type !== 0 && widget.type !== 1 && widget.type !== 3 && widget.type !== 8 || (widget.type === 8 && widget.contentType < 2)">
         <div class="field">
           <label class="label">Widget Width</label>
           <input class="" :min="getWidgetMinimumSize(widget).width" :max="$store.state.stats.width * 2" type="number"
@@ -137,7 +148,7 @@
                  v-model.number="widget.height">
         </div>
       </div>
-      <div v-else-if="widget.type === 3">
+      <div v-else-if="widget.type === 3 || (widget.type === 8 && widget.contentType === 2)">
         <div class="field">
           <label class="label">Widget Diameter</label>
           <input class="" min="5" :max="$store.state.stats.width" type="number" v-model.number="widget.width"
@@ -154,20 +165,25 @@
           <input class="" min="0" :max="$store.state.stats.height - 1" type="number" v-model.number="widget.yOff">
         </div>
       </div>
+      <div>
+        <md-checkbox v-if="widget.type === 8 || widget.type === 4" v-model="widget.background" @change="changeBackground">Background</md-checkbox>
+      </div>
+      <md-checkbox v-if="(widget.contentType !== 3 || widget.type !== 8) && !widget.background" v-model="widget.transparent">Transparent</md-checkbox>
       <template v-if="widget.type !== 0 && widget.type !== 1">
-        <md-checkbox v-model="widget.transparent">Transparent</md-checkbox>
-        <md-checkbox v-model="widget.bordered">Bordered</md-checkbox>
+        <md-checkbox v-if="widget.type !== 8" v-model="widget.bordered">Bordered</md-checkbox>
+        <div></div>
         <div class="field" v-for="(color, index) in widget.colors">
           <color-picker :label="requiredColors(widget.type)[index]" class="color-picker" v-model="widget.colors[index]"></color-picker>
         </div>
       </template>
-      <div>
-        <div class="field" v-if="!widget.transparent && widget.type !== 0 && widget.type !== 1">
-          <color-picker label="Background" class="color-picker" v-model="widget.backgroundColor"></color-picker>
-        </div>
-        <div class="field" v-if="widget.bordered">
-          <color-picker label="Border" class="color-picker" v-model="widget.borderColor"></color-picker>
-        </div>
+      <div class="field" v-if="widget.type === 8 && widget.contentType === 3">
+        <color-picker label="Pixel" class="color-picker" v-model="widget.backgroundColor"></color-picker>
+      </div>
+      <div class="field" v-else-if="!widget.transparent && widget.type !== 0 && widget.type !== 1">
+        <color-picker label="Background" class="color-picker" v-model="widget.backgroundColor"></color-picker>
+      </div>
+      <div class="field" v-if="widget.bordered">
+        <color-picker label="Border" class="color-picker" v-model="widget.borderColor"></color-picker>
       </div>
     </template>
     <div>
@@ -246,18 +262,29 @@ export default {
           break
       }
     },
+    changeBackground(background) {
+      if (background)
+        this.widget.transparent = false
+    },
     changeText () {
       if (this.widget.type === 4)
         this.widget.content = this.widget.content.toUpperCase()
     },
     changeCert() {
-      console.log(this.widget.cert)
+      // Todo: potentially apply formatting to fix issues
+      //console.log(this.widget.cert)
     },
-    changeBackgroundColor(color) {
-      this.widget.backgroundColor = this.jsHexToCpp(color)
-    },
-    changeBorderColor(color) {
-      this.widget.borderColor = this.jsHexToCpp(color.hex)
+    changeShape() {
+      if (this.widget.contentType === 2)
+        this.widget.height = this.widget.width
+      this.widget.colors.length = this.widget.contentType === 3 ? 0 : 1
+      if (this.widget.colors.length > 0 && !this.widget.colors[0])
+        this.widget.colors[0] = "0xFF0000"
+      if (this.widget.contentType === 3) {
+        this.widget.width = 1
+        this.widget.height = 1
+        this.widget.transparent = false
+      }
     },
     changeRadius() {
       this.widget.height = this.widget.width
@@ -283,6 +310,11 @@ export default {
         return []
       else if (this.widget.type === 3)
         return ['Minute', 'Hour', 'Marking']
+      else if (this.widget.type === 8) {
+        if (this.widget.contentType === 3)
+          return []
+        return ['Shape']
+      }
       else
         return ['Text']
     }

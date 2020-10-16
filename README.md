@@ -9,7 +9,7 @@ interface. This is one of my first substantial C++/HTML projcts, so some aspects
 is a placeholder until something clever comes along.
 
 ## Features
-* Self-hosted web dashboard
+* Integrated web dashboard
 * Drag and drop widget based display configuration
 * Built-in image editor with support for standard images and binary formats
 * Several display brightness control modes

@@ -6,7 +6,7 @@
       <md-button @click="save" class="md-raised md-accent">Save Configuration</md-button>
       <color-picker label="Background" class="color-picker" v-model="config.backgroundColor"></color-picker>
       <md-content class="display"
-                  v-bind:style="{width: `${64 * pixelSize}px`, height: `${32 * pixelSize}px`, backgroundColor: cppHexToJs(config.backgroundColor)}">
+                  v-bind:style="{width: `${$store.state.stats.width * pixelSize}px`, height: `${$store.state.stats.height * pixelSize}px`, backgroundColor: cppHexToJs(config.backgroundColor)}">
         <widget @doubletap="scrollToWidget(widget.id)" :pixel-size="pixelSize" v-for="widget in config.widgets"
                 v-bind:key="createUniqueKey(widget)" :widget="widget"
                 v-if="!widget.disabled"></widget>
@@ -19,7 +19,7 @@
         Create a Widget to get started
       </div>
       <md-button @click="addWidgetDialog = true" class="md-raised md-accent">Add Widget</md-button>
-      <md-card id="widgets" v-bind:style="{'max-height': $isMobile() ? null : '490px' }"
+      <md-card id="widgets" v-bind:style="{'max-height': $isMobile() ? null : `${Math.max($store.state.stats.height * pixelSize + 15, 490)}px` }"
                class="md-accent md-scrollbar widget-panel-widgets">
         <widget-editor :id="`widget${widget.id}`" @delete="config.widgets.splice(index, 1)"
                        @clone="config.widgets.push(cloneObject(widget))" class="widget-editor"
@@ -46,10 +46,10 @@
       <md-dialog-title>Load Preset</md-dialog-title>
       <md-field>
         <md-select v-model="presetName" @input="parameters = []">
-          <md-option v-for="(args, name) in presets" :key="name" :value="name"> {{ name }}</md-option>
+          <md-option v-for="(preset, index) in presets.filter(p => p.type === 'both' || p.type === ($store.state.configuration.vertical ? 'vertical' : 'horizontal'))" :key="preset.name" :value="preset.name"> {{ preset.name }}</md-option>
         </md-select>
       </md-field>
-      <md-field v-for="(label, key) in presets[presetName]" :key="key">
+      <md-field v-if="presets.find(preset => preset.name === presetName).params" v-for="(label, key) in presets.find(preset => preset.name === presetName).params" :key="key">
         <label>{{ label }}</label>
         <md-input v-model="parameters[key]"></md-input>
       </md-field>
@@ -81,19 +81,37 @@ export default {
     addWidgetDialog: false,
     addWidgetType: 0,
     presetDialog: false,
-    presetName: 'Black Lives Matter',
-    presets: {
-      'Black Lives Matter': [],
-      'Mario Clock': [],
-      'Youtube Subscriber Count': ['Channel ID', 'Google API Key'],
-      'Tetris Clock': []
-    }
+    presetName: 'Taz Clock',
+    presets: [
+      {
+        name: 'Black Lives Matter',
+        type: 'horizontal'
+      },
+      {
+        name: 'Mario Clock',
+        type: 'horizontal'
+      },
+      {
+        name: 'Taz Clock',
+        type: 'both'
+      },
+      {
+        name: 'Youtube Subscriber Count',
+        type: 'horizontal',
+        params: ['Channel ID', 'Google API Key']
+      },
+      {
+        name: 'Tetris Clock',
+        type: 'horizontal'
+      }
+    ]
   }),
   methods: {
     async loadPreset() {
       if (!this.areObjectsEqual(this.$store.state.configuration, this.config) && !(await this.confirm('Load Preset', 'Are you sure you want to load a display preset? This will erase unsaved changes')))
         return
       this.config.widgets.length = 0
+      let vertical = this.$store.state.configuration.vertical
 
       let widgets = []
       switch (this.presetName) {
@@ -130,6 +148,34 @@ export default {
               frequency: 100,
               colors: ['0x000000'],
               transparent: true
+            }
+          ]
+          break
+        case 'Taz Clock':
+          widgets = [
+            {
+              width: 23,
+              height: 28,
+              xOff: vertical ? 4 : 3,
+              yOff: vertical ? 18 : 3,
+              content: 'taz',
+              transparent: true,
+              length: 1,
+              colors: ['0x316594']
+            },
+            {
+              id: 1,
+              type: 2,
+              contentType: 1,
+              font: 2,
+              xOff: vertical ? 0 : 30,
+              yOff: vertical ? 45 : 21,
+              width: 32,
+              height: 9,
+              frequency: 100,
+              colors: ['0xFF0000'],
+              bordered: true,
+              borderColor: '0x00BFFF'
             }
           ]
           break
