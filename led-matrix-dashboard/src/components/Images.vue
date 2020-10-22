@@ -1,10 +1,19 @@
 <template>
   <div>
-    <div class="md-layout md-alignment-space-between-left">
-      <md-button class="md-accent md-raised md-layout-item" @click="refreshImages(true)">Refresh</md-button>
-      <md-button class="md-accent md-raised md-layout-item" @click="openCreateDialog">Create Image</md-button>
-      <input type="file" hidden ref="importFile" @input="onSelectImport">
-      <md-button class="md-accent md-raised md-layout-item" @click="$refs.importFile.click()">Import Image</md-button>
+    <div class="md-layout md-gutter md-alignment-space-between-left">
+      <div class="md-layout-item">
+        <md-button class="wide md-accent md-raised" @click="refreshImages(true)">Refresh</md-button>
+        <md-tooltip md-delay="1000" md-direction="bottom"> Refresh display images </md-tooltip>
+      </div>
+      <div class="md-layout-item">
+        <md-button class="wide md-accent md-raised" @click="openCreateDialog">Create Image</md-button>
+        <md-tooltip md-delay="1000" md-direction="bottom"> Create a new custom image </md-tooltip>
+      </div>
+      <div class="md-layout-item">
+        <input type="file" hidden ref="importFile" @input="onSelectImport">
+        <md-button class="wide md-accent md-raised" @click="$refs.importFile.click()">Import Image</md-button>
+        <md-tooltip md-delay="1000" md-direction="bottom"> Import an image </md-tooltip>
+      </div>
     </div>
     <div>
       <md-card v-for="(data, image) in this.$store.state.imageData" v-bind:key="image">
@@ -12,15 +21,25 @@
           {{ image }}
           <md-button v-if="!$store.state.imageData[image].progmem" class="md-icon-button" @click="openRenameDialog(image)">
             <md-icon>create</md-icon>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Rename image </md-tooltip>
           </md-button>
         </md-card-header>
         <md-card-media>
           <image-preview :interval="0" :frame="0" :frames="1" :progress-bar="true" :pixel-size="pixelSize" :image="image" :canvas-height="pixelSize * data.height" :canvas-width="pixelSize * data.width"></image-preview>
         </md-card-media>
         <md-card-actions md-alignment="space-between">
-          <md-button class="md-accent md-raised" @click="getImage(image)">Reload</md-button>
-          <md-button class="md-accent md-raised" :href="'#/edit_image/' + image">Edit</md-button>
-          <md-button :disabled="data.progmem" class="md-accent md-raised" @click="deleteImageClick(image)">Delete</md-button>
+          <div class="inline-centered">
+            <md-button class="md-accent md-raised" @click="getImage(image)">Reload</md-button>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Reload image </md-tooltip>
+          </div>
+          <div class="inline-centered">
+            <md-button class="md-accent md-raised" :href="'#/edit_image/' + image">Edit</md-button>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Edit image </md-tooltip>
+          </div>
+          <div class="inline-centered">
+            <md-button :disabled="data.progmem" class="md-accent md-raised" @click="deleteImageClick(image)">Delete</md-button>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Delete image </md-tooltip>
+          </div>
         </md-card-actions>
       </md-card>
     </div>

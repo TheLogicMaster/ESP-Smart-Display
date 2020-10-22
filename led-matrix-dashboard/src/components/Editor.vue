@@ -3,9 +3,18 @@
     <md-card class="json-editor md-layout-item">
       <h1>Configuration Editor</h1>
       <div class="md-layout">
-        <md-button class="md-layout-item md-accent md-raised" @click="manualReload">Reload</md-button>
-        <md-button class="md-layout-item md-accent md-raised" @click="manualSave">Save</md-button>
-        <md-checkbox class="md-layout-item md-accent" v-model="autoSave" @change="changeAutoSave">Auto-Save</md-checkbox>
+        <div class="md-layout-item">
+          <md-button class="wide md-accent md-raised" @click="manualReload">Reload</md-button>
+          <md-tooltip md-delay="1000" md-direction="bottom"> Reload display configuration </md-tooltip>
+        </div>
+        <div class="md-layout-item">
+          <md-button class="wide md-accent md-raised" @click="manualSave">Save</md-button>
+          <md-tooltip md-delay="1000" md-direction="bottom"> Save display configuration </md-tooltip>
+        </div>
+        <div class="md-layout-item">
+          <md-checkbox class="md-accent" v-model="autoSave" @change="changeAutoSave">Auto-Save</md-checkbox>
+          <md-tooltip md-delay="1000" md-direction="bottom"> Enable auto-saving with each change </md-tooltip>
+        </div>
       </div>
       <JsonEditor
           :options="{

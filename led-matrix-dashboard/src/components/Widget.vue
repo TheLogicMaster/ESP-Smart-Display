@@ -7,10 +7,13 @@
       <div v-else-if="widget.type === 4"
            v-bind:style="{color: cppHexToJs(widget.colors[0]), fontSize: `${getWidgetMinimumSize(widget).height * pixelSize}px`}"> {{ widget.content }}
       </div>
-      <div v-else-if="widget.type === 5 || widget.type === 6" v-bind:style="{fontSize: `${widget.width < 15 ? 20 : createDefaultWidget(widget.type).height * pixelSize}px`}">
+      <div v-else-if="widget.type === 5 || widget.type === 6" v-bind:style="{color: cppHexToJs(widget.colors[0]), fontSize: `${widget.width < 15 ? 20 : createDefaultWidget(widget.type).height * pixelSize}px`}">
         API
       </div>
       <div v-else-if="widget.type === 8" v-bind:style="shapeStyle"></div>
+      <div v-else-if="widget.type === 9" v-bind:style="{color: cppHexToJs(widget.colors[0]), fontSize: `${getWidgetMinimumSize(widget).height * pixelSize}px`}">
+        {{ variableValues[widget.offset] + (widget.length ? variableUnits[widget.offset] : '') }}
+      </div>
       <img v-else class="image-pixelated" :src="widgetIcon" alt="Widget Icon" :style="iconStyle">
     </div>
   </div>
@@ -29,6 +32,8 @@ export default {
     rawHeight: 1,
     selected: 0,
     nonResizeableTypes: [0, 1],
+    variableValues: ['60', '50', '62', '57', '10000', '1012', '61', '13'],
+    variableUnits: ['F', 'F', 'F', 'F', 'm', 'mBar', '%', 'MPH'],
     currentWidget: {},
     interactable: null,
     resizing: false,

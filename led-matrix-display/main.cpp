@@ -12,6 +12,15 @@
 #define WIDGET_TEXT_GET 6
 #define WIDGET_WEATHER_ICON 7
 #define WIDGET_SHAPE 8
+#define WIDGET_VARIABLE 9
+#define VARIABLE_TEMPERATURE 0
+#define VARIABLE_TEMPERATURE_PERCEIVED 1
+#define VARIABLE_TEMPERATURE_HIGH 2
+#define VARIABLE_TEMPERATURE_LOW 3
+#define VARIABLE_VISIBILITY 4
+#define VARIABLE_PRESSURE 5
+#define VARIABLE_HUMIDITY 6
+#define VARIABLE_WIND_SPEED 7
 #define FONT_TINY 0
 #define FONT_TETRIS 1
 #define FONT_GFX 2
@@ -48,9 +57,11 @@
 #define SUN_UPDATE_INTERVAL 7200000 // Every 2 hours, since sun won't rise within 2 hours of date change
 #define BRIGHTNESS_SENSOR_PIN A0 // The pin to get photoresistor value from, if using
 #define BRIGHTNESS_ROLLING_AVG_SIZE 10 // Higher value makes transition smoother, 4 bytes per buffer value, zero for no buffer
-#define HTTPS_TRANSMIT_BUFFER 512 // Limit HTTPS buffers to prevent HTTPS GET requests all failing
-#define HTTPS_RECEIVE_BUFFER 1024
+#define HTTPS_TRANSMIT_BUFFER 512 // Limit HTTPS buffers on ESP8266 to prevent HTTPS GET requests all failing
+#define HTTPS_RECEIVE_BUFFER 512
 #define ALPHA_COLOR_DISTANCE 27 // The squared distance between image alpha colors and pixel colors to count as transparent, to account for conversion errors
+#define WEATHER_BUFFER_SIZE 1000 // The size of the buffer for parsing weather API responses
+#define WEATHER_TIMEOUT 10000 // The timeout for weather API requests in ms
 
 // Configuration Values
 #ifndef USE_BRIGHTNESS_SENSOR
@@ -66,10 +77,10 @@
 #define USE_DOUBLE_BUFFERING true // Only disable if pressed for memory, will cause visual glitches/partial rendering
 #endif
 #ifndef CACHE_DASHBOARD
-#define CACHE_DASHBOARD true // Shouldn't cause issues, with dashboard version checking
+#define CACHE_DASHBOARD true // Disable for dashboard development, I guess
 #endif
 #ifndef USE_SUNRISE
-#define USE_SUNRISE true // Disable to save space if Subrise brightness mode isn't needed
+#define USE_SUNRISE true // Disable to save space if Sunrise brightness mode isn't needed
 #endif
 #ifndef USE_NTP
 #define USE_NTP true // Disable to save space if OTA updating isn't needed
@@ -95,7 +106,7 @@
 #ifndef BOARD_NAME
 #ifdef ESP32
 #define BOARD_NAME "generic-esp32" // Used to identify OTA update binaries
-#elif
+#else
 #define BOARD_NAME "generic-esp8266" // Used to identify OTA update binaries
 #endif
 #endif
@@ -125,6 +136,11 @@
 #else
 #define DEBUG(...)
 #endif
+#if USE_DOUBLE_BUFFERING
+#define double_buffer
+#endif
+#define PxMATRIX_MAX_HEIGHT DISPLAY_HEIGHT
+#define PxMATRIX_MAX_WIDTH DISPLAY_WIDTH
 
 #pragma endregion
 
@@ -155,6 +171,7 @@
 #include <AsyncJson.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
+#include <PxMatrix.h>
 #define ESP_DRD_USE_EEPROM true
 #include <ESP_DoubleResetDetector.h>
 #include <DNSServer.h>
@@ -164,8 +181,6 @@
 #endif
 #include <map>
 #if USE_WEATHER
-#include <JsonListener.h>
-#include <OpenWeatherMapForecast.h>
 #include "TinyIcons.h"
 #endif
 #if USE_SUNRISE
@@ -183,81 +198,6 @@
 #include "Mario.h"
 #include "Youtube.h"
 #endif                                            
-
-#pragma region PxMatrix
-//#define PxMATRIX_COLOR_DEPTH 4
-#if USE_DOUBLE_BUFFERING
-#define double_buffer
-#endif
-#define PxMATRIX_MAX_HEIGHT DISPLAY_HEIGHT
-#define PxMATRIX_MAX_WIDTH DISPLAY_WIDTH
-
-#include <PxMatrix.h>
-
-#ifdef ESP32
-#define P_LAT 22
-#define P_A 19
-#define P_B 23
-#define P_C 18
-#define P_D 5
-#define P_E 15
-#define P_OE 26 // Use 26 instead of 2 since pin isn't broken out on NodeMCU 32s
-TaskHandle_t displayUpdateTaskHandle = NULL;
-hw_timer_t * timer = NULL;
-portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
-#else
-#include <Ticker.h>
-Ticker display_ticker;
-#define P_LAT D0
-#define P_A D1
-#define P_B D2
-#define P_C D8
-#define P_D D6
-#define P_E D3
-#define P_OE D4
-#endif
-
-PxMATRIX display(DISPLAY_WIDTH, DISPLAY_HEIGHT, P_LAT, P_OE, P_A, P_B, P_C, P_D, P_E);
-
-#ifdef ESP8266
-// ISR for display refresh
-void display_updater() {
-  //display.displayTestPattern(70);
-  display.display(70);
-}
-#else
-void IRAM_ATTR display_updater(){
-  portENTER_CRITICAL_ISR(&timerMux);
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-  //notify task to unblock it 
-  vTaskNotifyGiveFromISR(displayUpdateTaskHandle, &xHigherPriorityTaskWoken );
-
-  //display task will be unblocked
-  if(xHigherPriorityTaskWoken){
-    //force context switch
-    portYIELD_FROM_ISR( );
-  }
-  portEXIT_CRITICAL_ISR(&timerMux);
-}
- 
-void displayUpdateTask(void *) {
-  for(;;){
-    //block here untill timer ISR unblocks task
-    if (ulTaskNotifyTake( pdTRUE, portMAX_DELAY))
-        display.display(70);
-  }
-}
-
-#endif
-#pragma endregion
-
-const uint16_t RED = display.color565(255, 0, 0);
-const uint16_t GREEN = display.color565(0, 255, 0);
-const uint16_t BLUE = display.color565(0, 0, 255);
-const uint16_t WHITE = display.color565(255, 255, 255);
-const uint16_t YELLOW = display.color565(255, 255, 0);
-const uint16_t CYAN = display.color565(0, 255, 255);
-const uint16_t MAGENTA = display.color565(255, 0, 255);
 
 struct rgbColor {
     uint8_t r;
@@ -355,18 +295,29 @@ bool fastUpdate;
 bool vertical;
 String weatherKey;
 String weatherLocation;
+String location;
 bool usingSunMoon;
 double longitude;
 double lattitude;
 
 // State values
+bool disableDisplay;
 uint8_t dashboardVersion;
 uint8_t state;
 time_t weatherUpdateTime;
 uint16_t weatherID = 200;
+uint16_t temperature;
+uint16_t temperaturePerceived;
+uint16_t temperatureMax;
+uint16_t temperatureMin;
+uint16_t pressure;
+uint8_t humidity;
+uint16_t visibility;
+uint8_t windSpeed;
 bool needsConfig; // If a configuration is needed
 bool needsUpdate; // If a full update is needed
 bool needsRestart; // If a system reboot is needed
+bool needsTimezone; // If the timezone needs to be set still
 uint8_t theHour12;
 uint8_t theHour;
 uint8_t theMinute;
@@ -382,6 +333,62 @@ uint8_t scanPattern;
 uint8_t muxPattern;
 uint8_t muxDelay;
 
+#ifdef ESP32
+#define P_LAT 22
+#define P_A 19
+#define P_B 23
+#define P_C 18
+#define P_D 5
+#define P_E 15
+#define P_OE 26 // Use 26 instead of 2 since pin isn't broken out on NodeMCU 32s
+TaskHandle_t displayUpdateTaskHandle = NULL;
+hw_timer_t * timer = NULL;
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+#else
+#include <Ticker.h>
+Ticker display_ticker;
+#define P_LAT D0
+#define P_A D1
+#define P_B D2
+#define P_C D8
+#define P_D D6
+#define P_E D3
+#define P_OE D4
+#endif
+
+PxMATRIX display(DISPLAY_WIDTH, DISPLAY_HEIGHT, P_LAT, P_OE, P_A, P_B, P_C, P_D, P_E);
+
+#ifdef ESP8266
+void display_updater() {
+    if (!disableDisplay)
+        display.display(70);
+}
+#else
+void IRAM_ATTR display_updater(){
+  portENTER_CRITICAL_ISR(&timerMux);
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  vTaskNotifyGiveFromISR(displayUpdateTaskHandle, &xHigherPriorityTaskWoken );
+  if(xHigherPriorityTaskWoken)
+    portYIELD_FROM_ISR( );
+  portEXIT_CRITICAL_ISR(&timerMux);
+}
+ 
+void displayUpdateTask(void *) {
+  for(;;)
+    if (ulTaskNotifyTake( pdTRUE, portMAX_DELAY) && !disableDisplay)
+        display.display(70);
+}
+
+#endif
+
+const uint16_t RED = display.color565(255, 0, 0);
+const uint16_t GREEN = display.color565(0, 255, 0);
+const uint16_t BLUE = display.color565(0, 0, 255);
+const uint16_t WHITE = display.color565(255, 255, 255);
+const uint16_t YELLOW = display.color565(255, 255, 0);
+const uint16_t CYAN = display.color565(0, 255, 255);
+const uint16_t MAGENTA = display.color565(255, 0, 255);
+
 #if BRIGHTNESS_ROLLING_AVG_SIZE > 0
 #include <RunningAverage.h>
 RunningAverage brightnessAverage(BRIGHTNESS_ROLLING_AVG_SIZE);
@@ -395,9 +402,6 @@ DNSServer dnsServer;
 Timezone timezone;
 #endif
 
-#if USE_WEATHER
-OpenWeatherMapForecast weatherClient;
-#endif
 DisplayBuffer displayBuffer;
 
 #if !USE_BRIGHTNESS_SENSOR
@@ -430,7 +434,12 @@ void closeFiles() {
         widgets[i].file.close();
 }
 
-bool parseConfig(JsonVariant& json, bool newConfig, String& errorString) {
+bool parseConfig(JsonVariant& json, String& errorString) {
+    if (DEBUGGING) {
+        DEBUG("Attempting to parse config: \n");
+        serializeJsonPretty(json, Serial);
+        Serial.println();
+    }
     if (!json) {
         errorString.concat("Invalid Config");
         return false;
@@ -444,7 +453,7 @@ bool parseConfig(JsonVariant& json, bool newConfig, String& errorString) {
     bool tempVertical = json["vertical"];
     bool tempTransparency = false;
     bool tempFastUpdate = json["fastUpdate"];
-    String tempTimezone = json["timezone"].isNull() ? "America/Detroit" : String(json["timezone"].as<char *>());
+    String tempLocation = json["timezone"].isNull() ? "America/Detroit" : String(json["timezone"].as<char *>());
 
     uint8_t tempBrightnessMode = json["brightnessMode"];
     bool tempUsingSunMoon = tempBrightnessMode == BRIGHTNESS_SUN;
@@ -479,9 +488,10 @@ bool parseConfig(JsonVariant& json, bool newConfig, String& errorString) {
                 errorString.concat(i);
                 return false;
             }
-            if (widget[F("disabled")])
+            if (widget["disabled"])
                 continue;
-            if (widget[F("type")] == WIDGET_WEATHER_ICON)
+
+            if (widget["type"] == WIDGET_WEATHER_ICON || (widget["type"] == WIDGET_VARIABLE && widget["offset"].as<uint8_t>() <= VARIABLE_WIND_SPEED))
                 tempUsingWeather = true;
 
             if (widget["transparent"])
@@ -540,16 +550,6 @@ bool parseConfig(JsonVariant& json, bool newConfig, String& errorString) {
     }
 
     // Only load new configuration after successful completion of config parsing
-#if USE_NTP
-    for (uint i = 0; i < 3 && newConfig; i++) {
-        if (timezone.setLocation(tempTimezone)) 
-            break;
-        if (i == 2) {
-            errorString.concat(F("Failed to set timezone"));
-            return false;
-        }
-    }
-#endif
 
     for (uint i = 0; i < widgets.size(); i++) {
         widgets[i].file.close();
@@ -582,6 +582,9 @@ bool parseConfig(JsonVariant& json, bool newConfig, String& errorString) {
     muxPattern = tempMuxPattern;
     scanPattern = tempScanPattern;
     muxDelay = tempMuxDelay;
+    if (location != tempLocation)
+        needsTimezone = true;
+    location = tempLocation;
 
     display.setFastUpdate(fastUpdate);
     display.setMuxPattern(static_cast<mux_patterns>(muxPattern));
@@ -630,7 +633,7 @@ bool getConfig() {
     
     String error;
     JsonVariant json = doc.as<JsonVariant>();
-    if (!parseConfig(json, false, error)) {
+    if (!parseConfig(json, error)) {
         Serial.printf("Failed to parse config: %s\n, replacing with default...\n", error.c_str());
         writeDefaultConfig();
         return false;
@@ -689,30 +692,24 @@ bool sendFile(AsyncWebServerRequest *request, String path, bool cache = true) {
     AsyncWebServerResponse *response = request->beginResponse(LittleFS, path, getContentType(path));
     if (!response)
         return false;
-    /*if (CACHE_DASHBOARD && cache) {
-        if (getHeaderCacheVersion(request) == dashboardVersion) {
-            request->send(304);
-            return true;
-        }
-        response->addHeader("ETag", String(dashboardVersion, 10));
-        response->addHeader(F("Cache-Control"), F("no-cache"));
-    }*/
     request->send(response);
     return true;
 }
 
-void serveRoot(AsyncWebServerRequest *request) {
-    if (!sendFile(request, F("/index.html")))
-        request->send(200, "text/html", R"=====(
+static const char noDashboardIndex[] PROGMEM = R"(
   <!DOCTYPE html>
   <html>
   <body>
-  <strong>Dashboard is not installed</strong>
-  <a href="https://github.com/TheLogicMaster/ESP-LED-Matrix-Display">Get Dashboard</a>
+  <h1>Dashboard is not installed</h1>
+  <a href="https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest" target="_blank">Get Dashboard</a>
   <a href="/recovery">Install Dashboard</a>
   </body>
   </html>
-)=====");
+)";
+
+void serveRoot(AsyncWebServerRequest *request) {
+    if (!sendFile(request, F("/index.html")))
+        request->send(200, "text/html", noDashboardIndex);
 }
 
 void serveSaveConfig(AsyncWebServerRequest *request, JsonVariant &json) {
@@ -728,7 +725,7 @@ void serveSaveConfig(AsyncWebServerRequest *request, JsonVariant &json) {
         needsUpdate = true;
 
         String error;
-        if (parseConfig(json, true, error)) {
+        if (parseConfig(json, error)) {
             LittleFS.remove("/config.json");
             File file = LittleFS.open("/config.json", "w");
             serializeJson(json, file);
@@ -754,6 +751,33 @@ void serveFullUpdate(AsyncWebServerRequest *request) {
     request->send(200);
 }
 
+void serveForceUpdate(AsyncWebServerRequest *request) {
+    for (uint i = 0; i < widgets.size(); i++)
+        widgets[i].lastUpdate = 0;
+    request->send(200);
+}
+
+void serveWeatherUpdate(AsyncWebServerRequest *request) {
+    weatherUpdateTime = 0;
+    request->send(200);
+}
+
+void serveSunMoonUpdate(AsyncWebServerRequest *request) {
+    sunMoonTime = 0;
+    request->send(200);
+}
+
+void serveTimezoneUpdate(AsyncWebServerRequest *request) {
+    needsTimezone = true;
+    request->send(200);
+}
+
+void serveTimeUpdate(AsyncWebServerRequest *request) {
+    timezone.setEvent(updateNTP);
+    setTime(0);
+    request->send(200);
+}
+
 void serveNotFound(AsyncWebServerRequest *request) {
     if (request->method() == HTTP_OPTIONS) {
         request->send(200);
@@ -770,14 +794,17 @@ void serveRestart(AsyncWebServerRequest *request) {
     needsRestart = true;
 }
 
+// Todo: Replace start and abort OTA functions with direct update functions
 void startOTA(AsyncWebServerRequest *request) {
     state = STATE_UPDATING;
+    disableDisplay = true;
     LittleFS.end();
     request->send(200);
 }
 
 void abortOTA(AsyncWebServerRequest *request) {
     state = STATE_NORMAL;
+    disableDisplay = false;
     LittleFS.begin();
     request->send(200);
     needsUpdate = true;
@@ -1105,7 +1132,7 @@ void serveOTAUpload(AsyncWebServerRequest *request, String filename, size_t inde
     }
 }
 
-static char recoveryIndex[] PROGMEM = R"(<!DOCTYPE html>
+static const char recoveryIndex[] PROGMEM = R"(<!DOCTYPE html>
      <html lang='en'>
      <head>
          <meta charset='utf-8'>
@@ -1140,6 +1167,11 @@ void setupWebserver() {
     server.on("/abortUpdate", abortOTA);
     server.on("/beginUpdate", startOTA);
     server.on("/fullRefresh", serveFullUpdate);
+    server.on("/forceUpdate", serveForceUpdate);
+    server.on("/refreshWeather", serveWeatherUpdate);
+    server.on("/refreshSunMoon", serveSunMoonUpdate);
+    server.on("/refreshTimezone", serveTimezoneUpdate);
+    server.on("/refreshTime", serveTimeUpdate);
     server.on("/restart", serveRestart);
     server.on("/stats", serveStats);
     server.on("/uploadImage", HTTP_POST, serveOK, serveUploadImage);
@@ -1150,7 +1182,7 @@ void setupWebserver() {
     server.on("/renameImage", serveRenameImage);
     server.on("/factoryReset", serveFactoryReset);
     server.on("/resetConfiguration", serveResetConfiguration);
-    server.serveStatic("/", LittleFS, "/", CACHE_DASHBOARD ? "no-cache" : __null);
+    server.serveStatic("/", LittleFS, "/", CACHE_DASHBOARD ? "no-cache" : NULL);
     server.onNotFound(serveNotFound);
     Serial.println(F("Starting configuration webserver..."));
     server.begin();
@@ -1323,10 +1355,11 @@ void drawTextWidget(Adafruit_GFX &d, Widget &widget) {
 #endif
 }
 
-bool sendGetRequest2(std::string &url, std::string &auth, uint16_t timeout, bool json, std::string &cert, std::string &result) {
+bool sendGetRequest3(std::string url, std::string auth, uint16_t timeout, bool json, std::string &cert, std::string &result) {
     HTTPClient httpClient;
     Serial.println(cert.c_str());
-    httpClient.begin(url.c_str(), cert.length() == 0 ? NULL : cert.c_str());
+    httpClient.begin(url.c_str());
+    //httpClient.begin(url.c_str(), cert.length() == 0 ? NULL : cert.c_str());
     httpClient.GET();
     Serial.println(httpClient.getString());
     httpClient.end();
@@ -1364,23 +1397,30 @@ bool sendGetRequest(std::string url, std::string auth, uint16_t timeout, bool js
     if (ssl) {
         WiFiClientSecure* secureClient = (WiFiClientSecure*)client;
 #ifdef ESP8266
-        if (cert.size() == 0)
+        if (cert.size() == 0) 
             secureClient->setInsecure();
-        else // Todo: Test ESP8266 certificate handling
-            secureClient->setCACert((const uint8_t*)cert.c_str(), cert.size());
+        else  // Todo: Test ESP8266 certificate handling
+            secureClient->setCACert((const uint8_t*)cert.c_str(), cert.size());        
         // Impossible to send requests without limiting buffer sizes, though this may cause issues receiving responses if server doesn't support MFLN
         secureClient->setBufferSizes(HTTPS_RECEIVE_BUFFER, HTTPS_TRANSMIT_BUFFER);
+        client->setTimeout(timeout);
 #else
-        secureClient->setCACert(cert.c_str());
+        if (cert.size() > 0) 
+            secureClient->setCACert(cert.c_str());
+        client->setTimeout(timeout / 1000);
 #endif
     }
-    client->flush();
-    client->setTimeout(timeout);
+    //client->flush();
     DEBUG("Connecting to: %s\n", host.c_str());
-	if (!client->connect(host.c_str(), port)){
+#ifdef ESP32 // Display task causes TLS handshake failure
+    disableDisplay = true;
+#endif
+	if (!client->connect(host.c_str(), port)) {
         Serial.println(F("Failed to connect to GET address"));
+        disableDisplay = false;
         return false;
     }
+    disableDisplay = false;
 
     #if defined(ESP8266)
         yield();
@@ -1494,7 +1534,7 @@ void updateTextGETWidgetJson(Widget &widget) {
             }
         }
         String s = String(jsonVariantToString(current));
-        if (widget.font >= FONT_GFX)
+        if (widget.font == FONT_TINY)
             s.toUpperCase();
         if (widget.font == FONT_TETRIS)
             ensureTetrisAllocated(widget);
@@ -1508,7 +1548,7 @@ void updateTextGETWidget(Widget &widget) {
     if (!sendGetRequest(widget.source, widget.auth, widget.length, false, widget.cert, data))
         return;
     String s = String(data.c_str());
-    if (widget.font >= FONT_GFX)
+    if (widget.font == FONT_TINY)
         s.toUpperCase();
     if (widget.font == FONT_TETRIS)
             ensureTetrisAllocated(widget);
@@ -1560,6 +1600,68 @@ void updateClockWidget(Widget &widget) {
 #endif
 }
 
+void updateVariableWidget(Widget &widget) {
+    String content;
+    switch (widget.offset) {
+        case VARIABLE_TEMPERATURE:
+            content = temperature;
+            break;
+        case VARIABLE_TEMPERATURE_PERCEIVED:
+            content = temperaturePerceived;
+            break;
+        case VARIABLE_TEMPERATURE_HIGH:
+            content = temperatureMax;
+            break;
+        case VARIABLE_TEMPERATURE_LOW:
+            content = temperatureMin;
+            break;
+        case VARIABLE_HUMIDITY:
+            content = humidity;
+            break;
+        case VARIABLE_PRESSURE:
+            content = pressure;
+            break;
+        case VARIABLE_VISIBILITY:
+            content = visibility;
+            break;
+        case VARIABLE_WIND_SPEED:
+            content = windSpeed;
+            break;
+        default:
+            Serial.printf("Invalid variable id: %i\n", widget.offset);
+            break;
+    }
+    if (widget.length)
+        switch (widget.offset) {
+            case VARIABLE_TEMPERATURE:
+            case VARIABLE_TEMPERATURE_PERCEIVED:
+            case VARIABLE_TEMPERATURE_HIGH:
+            case VARIABLE_TEMPERATURE_LOW:
+                content.concat(metric ? 'C' : 'F');
+                break;
+            case VARIABLE_HUMIDITY:
+                content.concat('%');
+                break;
+            case VARIABLE_WIND_SPEED:
+                content.concat(metric ? "KPH" : "MPH");
+                break;
+            case VARIABLE_PRESSURE:
+                content.concat("mBar");
+                break;
+            case VARIABLE_VISIBILITY:
+                content.concat("m");
+                break;
+            default:
+                break;
+        }
+    if (widget.font == FONT_TINY)
+        content.toUpperCase();
+    if (content != widget.content.c_str()) {
+        widget.dirty = true;
+        widget.content = content.c_str();
+    }
+}
+
 void updateWidget(Widget &widget) {
     switch (widget.type) {
         case WIDGET_PROGMEM_IMAGE:
@@ -1585,6 +1687,9 @@ void updateWidget(Widget &widget) {
             if (!widget.finished)
                 widget.dirty = true;
         }
+            break;
+        case WIDGET_VARIABLE:
+            updateVariableWidget(widget);
             break;
         default:
             Serial.print(F("Invalid widget type to update: "));
@@ -1665,6 +1770,7 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
         case WIDGET_TEXT_GET:
         case WIDGET_TEXT:
         case WIDGET_CLOCK:
+        case WIDGET_VARIABLE:
             drawTextWidget(d, widget);
             break;
         case WIDGET_WEATHER_ICON:
@@ -1801,24 +1907,41 @@ void updateBrightness() {
 }
 
 void updateWeather() {
-    if (!usingWeather || weatherUpdateTime == 0 || millis() - weatherUpdateTime < WEATHER_UPDATE_INTERVAL)
+    if (!usingWeather || (weatherUpdateTime != 0 && millis() - weatherUpdateTime < WEATHER_UPDATE_INTERVAL))
         return;
     weatherUpdateTime = millis();
 
 #if USE_WEATHER
-    OpenWeatherMapForecastData data[1];
-    weatherClient.setMetric(metric);
-    weatherClient.setLanguage(F("en"));
-    uint8_t allowedHours[] = {0, 12};
-    weatherClient.setAllowedHours(allowedHours, 2);
-    // See https://docs.thingpulse.com/how-tos/openweathermap-key/
-
-    if (!weatherClient.updateForecastsById(data, weatherKey, weatherLocation, 1)) {
-        Serial.println(F("Failed to update weather info"));
+    std::string data, cert;
+    std::string address = "http://api.openweathermap.org/data/2.5/weather?id=";
+    address.append(weatherLocation.c_str());
+    address.append("&appid=");
+    address.append(weatherKey.c_str());
+    address.append("&units=");
+    address.append(metric ? "metric" : "imperial");
+    Serial.println(address.c_str());
+    if (!sendGetRequest(address, "", WEATHER_TIMEOUT, true, cert, data))
         return;
-    }
 
-    weatherID = data[0].weatherId;
+    StaticJsonDocument<WEATHER_BUFFER_SIZE> doc;
+    DeserializationError error = deserializeJson(doc, data);
+    if (error) {
+        Serial.print(F("Failed to deserialize response data: "));
+        Serial.println(error.c_str());
+    } else {
+        if (doc["weather"][0].isNull())
+            Serial.println("Weather response JSON was null");
+        else 
+            weatherID = doc["weather"][0]["id"];
+        temperature = doc["main"]["temp"];
+        temperaturePerceived = doc["main"]["feels_like"];
+        temperatureMin = doc["main"]["temp_min"];
+        temperatureMax = doc["main"]["temp_max"];
+        pressure = doc["main"]["pressure"];
+        humidity = doc["main"]["humidity"];
+        visibility = doc["visibility"];
+        windSpeed = doc["wind"]["speed"];
+    }
 #endif
 }
 
@@ -1836,6 +1959,13 @@ void updateSunMoon() {
 
 void updateTime() {
 #if USE_NTP
+    if (needsTimezone) {
+        if (timezone.setLocation(location))
+            DEBUG("Set timezone\n");
+        else
+            DEBUG("Failed to set timezone\n");
+    }
+        needsTimezone = false;
     if (!bootTime && timeStatus() == timeSet) 
         bootTime = timezone.tzTime(TIME_NOW, UTC_TIME);
     events(); // Handle NTP events
@@ -1908,19 +2038,23 @@ void setup() {
     display.showBuffer();
     display.fillScreen(GREEN);
 
-    if (!LittleFS.begin()) {
+    if (!LittleFS.begin() && !LittleFS.begin()) {
         display.fillScreen(BLUE);
         display.println(F("FS ERROR"));
         Serial.println(F("Failed to open filesystem"));
+        display.showBuffer();
         delay(3000);
         display.fillScreen(BLUE);
         display.setCursor(0, 0);
         display.println(F("Formatting"));
         display.println(F("Display..."));
         Serial.println(F("Formatting Display"));
+        display.showBuffer();
         delay(3000);
         display.fillScreen(0);
-        LittleFS.begin(true);
+        display.showBuffer();
+        LittleFS.format();
+        LittleFS.begin();
         needsConfig = true;
     }
     File versionFile = LittleFS.open("/version.txt", "r");
@@ -1943,7 +2077,7 @@ void setup() {
         display.setCursor(0, 0);
         display.print(F("Connecting..."));
         display.showBuffer();
-        wifiManager.autoConnect("LED Matrix Display", __null, 5);
+        wifiManager.autoConnect("LED Matrix Display", NULL, 5);
     }
 
     drd.stop();
@@ -1962,9 +2096,7 @@ void setup() {
     //LittleFS.remove("/config.json");
 
 #if USE_NTP
-    //waitForSync(5);
     timezone.setDefault();
-    //waitForSync(2);
 #endif
 
     if (needsConfig || !getConfig()) {
@@ -1983,28 +2115,28 @@ void setup() {
     }
 
     display.setTextWrap(false);
+    display.fillScreen(BLUE);
+    display.setCursor(0, 0);
+    display.println(F("Loading"));
+    display.showBuffer();
 }
 
 void loop() {
     if (needsRestart)
         ESP.restart();
 
-    updateTime();
-    updateWeather();
-    updateSunMoon();
-    updateBrightness();
-
     switch (state) {
         default:
             Serial.printf("Unknown state: %i/n", state);
-        case STATE_NORMAL:
-            updateScreen(needsUpdate);
-            break;
         case STATE_UPDATING:
-            display.fillScreen(0);
-            display.showBuffer();
+            break;
+        case STATE_NORMAL:
+            updateTime();
+            updateWeather();
+            updateSunMoon();
+            updateBrightness();
+            updateScreen(needsUpdate);
+            updateArduinoOTA();
             break;
     }
-
-    updateArduinoOTA();
 }

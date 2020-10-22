@@ -5,20 +5,36 @@
         <h1>OTA Update</h1>
       </md-card-header>
       <md-card-content>
-        <md-button class="md-accent md-raised" :disabled="progress >= 0" @click="checkForUpdate">Check for Update</md-button>
+        <div class="inline-centered">
+          <md-button class="md-accent md-raised" :disabled="progress >= 0" @click="checkForUpdate">Check for Update</md-button>
+          <md-tooltip md-delay="1000" md-direction="bottom"> Check GitHub for updates </md-tooltip>
+        </div>
         <div v-if="this.$store.state.latestVersion !== this.$store.state.stats.version">Display out of date</div>
         <div v-else-if="this.$store.state.latestVersion !== this.$dashboardVersion">Dashboard out of date</div>
         <div v-else>Up to date</div>
         <md-progress-bar v-if="progress >= 0" md-mode="determinate" :md-value="progress"></md-progress-bar>
         <form novalidate class="md-layout" @submit.prevent="updateDialog = true">
-          <md-radio v-model="selected" value="firmware" :disabled="progress >= 0">Firmware</md-radio>
-          <md-radio v-model="selected" value="filesystem" :disabled="progress >= 0">Dashboard</md-radio>
-          <md-checkbox v-model="manual" :disabled="progress >= 0">Manual</md-checkbox>
+          <div class="inline-centered">
+            <md-radio v-model="selected" value="firmware" :disabled="progress >= 0">Firmware</md-radio>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Firmware update mode </md-tooltip>
+          </div>
+          <div class="inline-centered">
+            <md-radio v-model="selected" value="filesystem" :disabled="progress >= 0">Dashboard</md-radio>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Dashboard update mode </md-tooltip>
+          </div>
+          <div class="inline-centered">
+            <md-checkbox v-model="manual" :disabled="progress >= 0">Manual</md-checkbox>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Manually flash using a binary file </md-tooltip>
+          </div>
           <md-field v-if="manual">
             <label>Binary</label>
             <md-file accept=".bin,.bin.gz" @md-change="onSelect" :disabled="progress >= 0"/>
+            <md-tooltip md-delay="1000" md-direction="bottom"> The binary file to flash </md-tooltip>
           </md-field>
-          <md-button class="md-accent md-raised" type="submit" :disabled="progress >= 0">Update</md-button>
+          <div class="inline-centered">
+            <md-button class="md-accent md-raised" type="submit" :disabled="progress >= 0">Update</md-button>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Perform software update </md-tooltip>
+          </div>
         </form>
       </md-card-content>
     </md-card>
@@ -53,6 +69,7 @@ export default {
   }),
   methods: {
     onSelect(files) {
+      // Todo: switch to normal file input if md-file blank file glitch isn't fixed
       if (files.length> 0)
         this.binary = files[0]
     },

@@ -1,10 +1,22 @@
 <template>
   <div>
     <div class="display-panel">
-      <md-button @click="presetDialog = true" class="md-raised md-accent">Load Preset</md-button>
-      <md-button @click="reload" class="md-raised md-accent">Reload Configuration</md-button>
-      <md-button @click="save" class="md-raised md-accent">Save Configuration</md-button>
-      <color-picker label="Background" class="color-picker" v-model="config.backgroundColor"></color-picker>
+      <div class="inline-centered">
+        <md-button @click="presetDialog = true" class="md-raised md-accent">Load Preset</md-button>
+        <md-tooltip md-delay="1000" md-direction="bottom"> Load pre-configured display layout</md-tooltip>
+      </div>
+      <div class="inline-centered">
+        <md-button @click="reload" class="md-raised md-accent">Reload Configuration</md-button>
+        <md-tooltip md-delay="1000" md-direction="bottom"> Reload display configuration</md-tooltip>
+      </div>
+      <div class="inline-centered">
+        <md-button @click="save" class="md-raised md-accent">Save Configuration</md-button>
+        <md-tooltip md-delay="1000" md-direction="bottom"> Save display configuration</md-tooltip>
+      </div>
+      <div>
+        <color-picker label="Background" class="color-picker" v-model="config.backgroundColor"></color-picker>
+        <md-tooltip md-delay="1000" md-direction="bottom"> The display background color </md-tooltip>
+      </div>
       <md-content class="display"
                   v-bind:style="{width: `${$store.state.stats.width * pixelSize}px`, height: `${$store.state.stats.height * pixelSize}px`, backgroundColor: cppHexToJs(config.backgroundColor)}">
         <widget @doubletap="scrollToWidget(widget.id)" :pixel-size="pixelSize" v-for="widget in config.widgets"
@@ -18,8 +30,12 @@
       <div v-if="config.widgets.length === 0">
         Create a Widget to get started
       </div>
-      <md-button @click="addWidgetDialog = true" class="md-raised md-accent">Add Widget</md-button>
-      <md-card id="widgets" v-bind:style="{'max-height': $isMobile() ? null : `${Math.max($store.state.stats.height * pixelSize + 15, 490)}px` }"
+      <div>
+        <md-button @click="addWidgetDialog = true" class="md-raised md-accent">Add Widget</md-button>
+        <md-tooltip md-delay="1000" md-direction="left"> Add a new widget to the display</md-tooltip>
+      </div>
+      <md-card id="widgets"
+               v-bind:style="{'max-height': $isMobile() ? null : `${Math.max($store.state.stats.height * pixelSize + 15, 490)}px` }"
                class="md-accent md-scrollbar widget-panel-widgets">
         <widget-editor :id="`widget${widget.id}`" @delete="config.widgets.splice(index, 1)"
                        @clone="config.widgets.push(cloneObject(widget))" class="widget-editor"
@@ -46,10 +62,14 @@
       <md-dialog-title>Load Preset</md-dialog-title>
       <md-field>
         <md-select v-model="presetName" @input="parameters = []">
-          <md-option v-for="(preset, index) in presets.filter(p => p.type === 'both' || p.type === ($store.state.configuration.vertical ? 'vertical' : 'horizontal'))" :key="preset.name" :value="preset.name"> {{ preset.name }}</md-option>
+          <md-option
+              v-for="(preset, index) in presets.filter(p => p.type === 'both' || p.type === ($store.state.configuration.vertical ? 'vertical' : 'horizontal'))"
+              :key="preset.name" :value="preset.name"> {{ preset.name }}
+          </md-option>
         </md-select>
       </md-field>
-      <md-field v-if="presets.find(preset => preset.name === presetName).params" v-for="(label, key) in presets.find(preset => preset.name === presetName).params" :key="key">
+      <md-field v-if="presets.find(preset => preset.name === presetName).params"
+                v-for="(label, key) in presets.find(preset => preset.name === presetName).params" :key="key">
         <label>{{ label }}</label>
         <md-input v-model="parameters[key]"></md-input>
       </md-field>
@@ -103,6 +123,10 @@ export default {
       {
         name: 'Tetris Clock',
         type: 'horizontal'
+      },
+      {
+        name: 'Weather',
+        type: 'horizontal'
       }
     ]
   }),
@@ -124,7 +148,7 @@ export default {
               background: true,
               frequency: 5000,
               length: 2,
-              type:1
+              type: 1
             }
           ]
           break
@@ -192,13 +216,12 @@ export default {
               length: 1
             },
             {
-              id: 1, // UCFKDEp9si4RmHFWJW1vYsMA
+              id: 1,
               type: 5,
               source: `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${this.parameters[0]}&key=${this.parameters[1]}`,
-              length: 15000,
+              length: 5000,
               frequency: 60000,
-              borderColor: '0xFF0000',
-              backgroundColor: '0x00FFFF',
+              backgroundColor: '0x000000',
               args: ['items', '0', 'statistics', 'subscriberCount'],
               colors: ['0x00FF00'],
               width: 29,
@@ -234,6 +257,167 @@ export default {
               colors: ['0x00FF00'],
               width: 36,
               height: 7
+            }
+          ]
+          break
+        case 'Weather':
+          widgets = [
+            {
+              "width": 64,
+              "height": 32,
+              "content": "weather",
+              "background": true,
+              "length": 1,
+              "type": 1
+            },
+            {
+              "id": 1,
+              "type": 2,
+              "font": 2,
+              "xOff": 34,
+              "yOff": 12,
+              "width": 30,
+              "height": 7,
+              "frequency": 100,
+              "colors": [
+                "0x000000"
+              ],
+              "transparent": true
+            },
+            {
+              "id": 2,
+              "xOff": 52,
+              "type": 7,
+              "frequency": 1000,
+              "bordered": true,
+              "width": 12,
+              "height": 7
+            },
+            {
+              "id": 3,
+              "xOff": 2,
+              "yOff": 13,
+              "type": 9,
+              "length": true,
+              "frequency": 1000,
+              "colors": [
+                "0x000000"
+              ],
+              "width": 12,
+              "height": 5,
+              "transparent": true
+            },
+            {
+              "id": 4,
+              "xOff": 10,
+              "yOff": 19,
+              "type": 9,
+              "length": true,
+              "offset": 2,
+              "frequency": 1000,
+              "colors": [
+                "0x000000"
+              ],
+              "width": 12,
+              "height": 5,
+              "transparent": true
+            },
+            {
+              "id": 5,
+              "xOff": 2,
+              "yOff": 19,
+              "type": 4,
+              "content": "H:",
+              "colors": [
+                "0x000000"
+              ],
+              "width": 8,
+              "height": 5,
+              "transparent": true
+            },
+            {
+              "id": 6,
+              "xOff": 10,
+              "yOff": 25,
+              "type": 9,
+              "length": true,
+              "offset": 3,
+              "frequency": 1000,
+              "colors": [
+                "0x000000"
+              ],
+              "width": 12,
+              "height": 5,
+              "transparent": true
+            },
+            {
+              "id": 7,
+              "xOff": 2,
+              "yOff": 25,
+              "type": 4,
+              "content": "L:",
+              "colors": [
+                "0x000000"
+              ],
+              "width": 8,
+              "height": 5,
+              "transparent": true
+            },
+            {
+              "id": 8,
+              "xOff": 51,
+              "yOff": 25,
+              "type": 9,
+              "length": true,
+              "offset": 6,
+              "frequency": 1000,
+              "colors": [
+                "0x000000"
+              ],
+              "width": 12,
+              "height": 5,
+              "transparent": true
+            },
+            {
+              "id": 9,
+              "xOff": 43,
+              "yOff": 25,
+              "type": 4,
+              "content": "H:",
+              "colors": [
+                "0x000000"
+              ],
+              "width": 8,
+              "height": 5,
+              "transparent": true
+            },
+            {
+              "id": 10,
+              "yOff": 7,
+              "type": 9,
+              "length": true,
+              "offset": 7,
+              "frequency": 1000,
+              "colors": [
+                "0x000000"
+              ],
+              "width": 20,
+              "height": 5,
+              "transparent": true
+            },
+            {
+              "id": 12,
+              "yOff": 1,
+              "type": 9,
+              "length": true,
+              "offset": 5,
+              "frequency": 1000,
+              "colors": [
+                "0x000000"
+              ],
+              "width": 32,
+              "height": 5,
+              "transparent": true
             }
           ]
           break

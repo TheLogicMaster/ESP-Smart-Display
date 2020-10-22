@@ -91,7 +91,8 @@ Vue.prototype.$widgetNames = [
   'JSON GET Text',
   'GET Plain-text',
   'Weather Icon',
-  'Geometric Shape'
+  'Geometric Shape',
+  'Variable'
 ]
 
 const UNIQUE_KEY_PROP = '__unique_key_prop__'
@@ -135,6 +136,11 @@ Vue.mixin({
           return false;
       }
       return true;
+    },
+    removeNonAscii(str) {
+      if (!str)
+        return ''
+      return str.replace(/[^\x20-\x7E]/g, '')
     },
     async checkForUpdate() {
       try {
@@ -497,7 +503,7 @@ Vue.mixin({
           break
         case 5: // GET JSON
         case 6: // GET Plaintext
-          size = {width: widget.large ? 6 : 4, height: widget.large ? 7 : 5}
+          size = this.getTextSize(1, widget.font, widget.contentType)
           break
         case 8: // Shape
           if (widget.contentType === 2)
@@ -507,6 +513,9 @@ Vue.mixin({
           else
             size = {width: 2, height: 2}
           break;
+        case 9: // Variable
+          size = this.getTextSize([2, 2, 2, 2, 5, 4, 2, 2][widget.offset] + (widget.length ? [1, 1, 1, 1, 1, 4, 1, 3][widget.offset] : 0), widget.font, widget.contentType)
+          break
         default:
           let stock = this.createDefaultWidget(widget.type)
           size = {width: stock.width, height: stock.height}
@@ -601,6 +610,13 @@ Vue.mixin({
           widget.height = 10
           widget.background = true
           widget.colors = ['0x0000FF']
+          break
+        case 9: // Variable
+          widget.width = 12
+          widget.height = 5
+          widget.frequency = 1000
+          widget.colors = ['0x00FF00']
+          widget.length = true
           break
       }
       return widget

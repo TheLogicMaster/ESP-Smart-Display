@@ -2,7 +2,10 @@
   <div>
     <md-card>
       <h1>Controls</h1>
-      <md-button v-for="(url, name) in commands" class="md-accent md-raised" @click="sendCommand(name)">{{ name }}</md-button>
+      <div v-for="(command, name) in commands">
+        <md-button class="md-accent md-raised" @click="sendCommand(name)">{{ name }}</md-button>
+        <md-tooltip md-delay="500" md-direction="left"> {{ command.tooltip }} </md-tooltip>
+      </div>
     </md-card>
   </div>
 </template>
@@ -12,11 +15,16 @@ export default {
   name: "Controls",
   data: () => ({
     commands: {
-      'Send Full Display Refresh': '/fullRefresh',
-      'Restart Display': '/restart',
-      'Delete all Images': '/deleteAllImages',
-      'Reset Display Configuration': '/resetConfiguration',
-      'Factory Reset Display': '/factoryReset'
+      'Full Display Refresh': {url: '/fullRefresh', tooltip: 'Fully re-draw the display'},
+      'Force Update Widgets': {url: '/forceUpdate', tooltip: 'Force all widgets to update'},
+      'Refresh Weather': {url: '/refreshWeather', tooltip: 'Refresh current weather data'},
+      'Refresh Sunrise/Sunset': {url: '/refreshSunMoon', tooltip: 'Refresh the sunset/sunrise times'},
+      'Refresh Timezone': {url: '/refreshTimezone', tooltip: 'Refresh the timezone offset'},
+      'Refresh Time': {url: '/refreshTime', tooltip: 'Refresh the current time'},
+      'Restart Display': {url: '/restart', tooltip: 'Restart the display'},
+      'Delete all Images': {url: '/deleteAllImages', tooltip: 'Delete all custom images'},
+      'Reset Display Configuration': {url: '/resetConfiguration', tooltip: 'Reset display configuration file'},
+      'Factory Reset Display': {url: '/factoryReset', tooltip: 'Reset display configuration and erase custom images'}
     }
   }),
   methods: {
@@ -25,7 +33,7 @@ export default {
         return
 
       try {
-        let response = await this.$axios.post(this.commands[name])
+        let response = await this.$axios.post(this.commands[name].url)
         if (response.status !== 200)
           this.error('Error', 'Failed to send command to display.')
       } catch (error) {

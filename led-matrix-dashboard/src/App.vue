@@ -30,41 +30,49 @@
           <md-list-item to="/" @click="clickSidebar">
             <md-icon>dashboard</md-icon>
             <span class="md-list-item-text">Dashboard</span>
+            <md-tooltip md-delay="1000" md-direction="right"> View display status </md-tooltip>
           </md-list-item>
 
           <md-list-item to="/display" @click="clickSidebar">
             <md-icon>queue_play_next</md-icon>
             <span class="md-list-item-text">Display</span>
+            <md-tooltip md-delay="1000" md-direction="right"> Edit display widgets </md-tooltip>
           </md-list-item>
 
           <md-list-item to="/images" @click="clickSidebar">
             <md-icon>wallpaper</md-icon>
             <span class="md-list-item-text">Images</span>
+            <md-tooltip md-delay="1000" md-direction="right"> Manage display images </md-tooltip>
           </md-list-item>
 
           <md-list-item to="/controls" @click="clickSidebar">
             <md-icon>settings_remote</md-icon>
             <span class="md-list-item-text">Controls</span>
+            <md-tooltip md-delay="1000" md-direction="right"> Send commands to display </md-tooltip>
           </md-list-item>
 
           <md-list-item to="/update" @click="clickSidebar">
             <md-icon>system_update</md-icon>
             <span class="md-list-item-text">Update</span>
+            <md-tooltip md-delay="1000" md-direction="right"> Update the display </md-tooltip>
           </md-list-item>
 
           <md-list-item to="/editor" @click="clickSidebar">
             <md-icon>edit</md-icon>
             <span class="md-list-item-text">Raw Editor</span>
+            <md-tooltip md-delay="1000" md-direction="right"> Edit the raw configuration file </md-tooltip>
           </md-list-item>
 
           <md-list-item to="/settings" @click="clickSidebar">
             <md-icon>settings</md-icon>
             <span class="md-list-item-text">Settings</span>
+            <md-tooltip md-delay="1000" md-direction="right"> Configure display settings </md-tooltip>
           </md-list-item>
 
           <md-list-item to="/backup" @click="clickSidebar">
             <md-icon>archive</md-icon>
             <span class="md-list-item-text">Backup</span>
+            <md-tooltip md-delay="1000" md-direction="right"> Backup and restore display configuration </md-tooltip>
           </md-list-item>
         </md-list>
       </md-app-drawer>
@@ -148,6 +156,15 @@ img {
   image-rendering: pixelated;
   image-rendering: -moz-crisp-edges;
   image-rendering: crisp-edges;
+}
+
+.inline-centered {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.wide {
+  width: 100%;
 }
 
 .backdrop {

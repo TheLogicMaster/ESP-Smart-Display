@@ -39,7 +39,10 @@ The full release binaries can be flashed using [esptool](https://github.com/espr
 [GUI version](https://github.com/Rodmg/esptool-gui). For esptool's command line interface: 
 ```shell script
 # Example command for NodeMCU V2
-esptool --port /dev/ttyUSB0 write_flash -fm dio 0x00000 nodemcuv2-32x64-v0.bin
+esptool --port /dev/ttyUSB0 write_flash -fm dio 0x00000 nodemcuv2-32x64-v1.bin
+
+# Example command for NodeMCU 32s
+esptool --port /dev/ttyUSB0 write_flash -fm dio 0x10000 nodemcu-32s-32x64-v1.bin
 ```
 Alternatively, you can use Platformio or Arduino
 IDE after downloading the latest [release](https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest) 
@@ -74,7 +77,6 @@ To use Arduino IDE, the following libraries must be installed through the librar
 * [ESPAsyncWebServer](https://github.com/me-no-dev/ESPAsyncWebServer) (Manually install)
 * ArduinoJson
 * ezTime
-* WeatherStation (And dependencies if using ESP8266 and Weather)
 * RunningAverage (If using brightness sensor "rolling" average)
 * TetrisAnimation (If using Tetris font)
 
@@ -133,6 +135,16 @@ Ensure that you download a backup of the configuration before updating, otherwis
 images will be lost. This can be done in the *Backup* page. After updating, simply upload your backup and everything should
 be restored. 
 
+## Filesystem Corruption Recovery
+If the dashboard website finishes loading but has a blank screen or the display unexpectedly needs configuration, the
+flash filesystem could have been corrupted. To re-install the dashboard, visit *http://{display-address}/recovery* to
+upload a filesystem binary from the [Releases Page](https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest).
+Flashing the display in this manner will erase all custom images and configuration settings, just like a normal OTA update.
+The display will not turn off when flashing from the recovery page, so you may want to cover the display to prevent strobing.
+Custom images can manually be recovered if only the dashboard was corrupted. Visit *http://{display-address}/images*
+to get a JSON file containing all stored images. Visit *http://{display-address}/image?image=blm* to download a binary
+file for image *blm*, for instance. This can be re-imported using the *images* page after the dashboard is re-installed.
+
 ## Configuration
 The display configuration is entirely based on a JSON configuration file stored in the display filesystem. This is
 primarily intended to be configured using the graphical interface, but the *Raw Configuration Editor* page can be used
@@ -174,6 +186,15 @@ location need to be configured on the *Settings* page.
 ### Analog Clock Widgets
 This is a scalable widget that draws a clock based on the current time. All time based widgets update ten times per
 second, so the maximum re-draw latency is 100ms. 
+
+### Geometric Shape Widgets
+These are static shape widgets that can be outlines or filled in.
+
+Availible shapes:
+* Rectangle
+* Rounded Rectangle
+* Circle
+* Pixel
 
 ## Logistics
 This project is intended to handle everything in a more asynchronous way to ensure consistent rendering. Previously, I

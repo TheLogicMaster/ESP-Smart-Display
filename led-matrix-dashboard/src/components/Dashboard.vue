@@ -2,9 +2,21 @@
   <div>
     <md-card>
       <h1>Dashboard</h1>
-      <md-button class="md-raised md-accent" @click="getStats">Refresh</md-button>
-      <md-checkbox class="md-layout-item md-accent" v-model="autoRefresh" @change="changeAutoRefresh"><b>Auto-Refresh</b></md-checkbox>
-      <md-checkbox class="md-layout-item md-accent" v-model="advanced"><b>Advanced</b></md-checkbox>
+      <div>
+        <div class="inline-centered">
+          <md-button class="md-raised md-accent" @click="getStats">Refresh</md-button>
+          <md-tooltip md-delay="1000" md-direction="bottom"> Refresh display stats </md-tooltip>
+        </div>
+        <div class="inline-centered">
+          <md-checkbox class="md-layout-item md-accent" v-model="autoRefresh" @change="changeAutoRefresh"><b>Auto-Refresh</b></md-checkbox>
+          <md-tooltip md-delay="1000" md-direction="bottom"> Automatically refresh every 5 seconds </md-tooltip>
+        </div>
+        <div class="inline-centered">
+          <md-checkbox class="md-layout-item md-accent" v-model="advanced"><b>Advanced</b></md-checkbox>
+          <md-tooltip md-delay="1000" md-direction="bottom"> Show advanced stats </md-tooltip>
+        </div>
+      </div>
+
       <md-list>
         <md-list-item class="md-layout md-gutter md-alignment-center-center">
           <b class="md-list-item stat-name"> Board Name </b>
@@ -151,4 +163,5 @@ export default {
   margin-right: 20px;
   margin-left: 20px;
 }
+
 </style>

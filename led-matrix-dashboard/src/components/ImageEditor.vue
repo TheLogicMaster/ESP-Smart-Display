@@ -6,55 +6,84 @@
           Editing <i> {{ $route.params.name }}</i>
         </div>
         <div>
-          <md-button class="md-accent md-raised" @click="reload(true)">Reload</md-button>
-          <md-button
-              :disabled="$store.state.imageData[$route.params.name] && $store.state.imageData[$route.params.name].progmem"
-              class="md-accent md-raised" @click="saveConfirm = true">Save
-          </md-button>
-          <md-button class="md-accent md-raised" @click="saveAsPrompt = true">Save As</md-button>
-          <md-button class="md-accent md-raised" @click="clear">Clear</md-button>
-          <md-button
-              :disabled="$store.state.imageData[$route.params.name] && $store.state.imageData[$route.params.name].progmem"
-              class="md-accent md-raised" @click="editorDeleteImage">Delete
-          </md-button>
-          <md-button class="md-icon-button" @click="downloadDialog = true">
-            <md-icon>save_alt</md-icon>
-          </md-button>
-          <md-button class="md-icon-button" @click="uploadDialog = true">
-            <md-icon>add_box</md-icon>
-          </md-button>
+          <div class="inline-centered">
+            <md-button class="md-accent md-raised" @click="reload(true)">Reload</md-button>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Reload image from display </md-tooltip>
+          </div>
+          <div class="inline-centered">
+            <md-button
+                :disabled="$store.state.imageData[$route.params.name] && $store.state.imageData[$route.params.name].progmem"
+                class="md-accent md-raised" @click="saveConfirm = true">Save
+            </md-button>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Save image to display </md-tooltip>
+          </div>
+          <div class="inline-centered">
+            <md-button class="md-accent md-raised" @click="saveAsPrompt = true">Save As</md-button>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Save image to display as </md-tooltip>
+          </div>
+          <div class="inline-centered">
+            <md-button class="md-accent md-raised" @click="clear">Clear</md-button>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Clear the image with a color </md-tooltip>
+          </div>
+          <div class="inline-centered">
+            <md-button
+                :disabled="$store.state.imageData[$route.params.name] && $store.state.imageData[$route.params.name].progmem"
+                class="md-accent md-raised" @click="editorDeleteImage">Delete
+            </md-button>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Delete image from display </md-tooltip>
+          </div>
+          <div class="inline-centered">
+            <md-button class="md-icon-button" @click="downloadDialog = true">
+              <md-icon>save_alt</md-icon>
+            </md-button>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Download image </md-tooltip>
+          </div>
+          <div class="inline-centered">
+            <md-button class="md-icon-button" @click="uploadDialog = true">
+              <md-icon>add_box</md-icon>
+            </md-button>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Insert image from file </md-tooltip>
+          </div>
         </div>
         <div>
           <md-button class="md-icon-button" @click="undo">
             <md-icon>undo</md-icon>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Undo pixel change </md-tooltip>
           </md-button>
           <input ref="colorPicker" v-model="color" type="color" hidden @change="changeColor"/>
           <md-field class="color-field">
             <label v-bind:style="{color: color}">Color</label>
             <md-input style="width: 100px" v-model="color" @click="$refs.colorPicker.click()"></md-input>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Change palette color </md-tooltip>
           </md-field>
           <div class="palette">
             <div v-for="i in 5" class="color"
                  v-bind:style="[{'border-color': selectedPalette === i ? '#17a412' : '#6e5226'}, {'background-color': palette[i - 1]}]"
                  @click="selectColor(i)" @dblclick="$refs.colorPicker.click()"></div>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Select palette color </md-tooltip>
           </div>
           <md-button class="md-icon-button" @click="redo">
             <md-icon>redo</md-icon>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Redo pixel change </md-tooltip>
           </md-button>
         </div>
         <div>
           <md-button class="md-icon-button" @click="deleteFrame" :disabled="frames === 1">
             <md-icon>clear</md-icon>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Delete image frame</md-tooltip>
           </md-button>
           <md-button class="md-icon-button" @click="frameBack" :disabled="frame <= 0">
             <md-icon>arrow_back</md-icon>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Go back one frame </md-tooltip>
           </md-button>
           <b>{{ frame + 1}}</b>
           <md-button class="md-icon-button" @click="frameForward" :disabled="frame >= frames - 1">
             <md-icon>arrow_forward</md-icon>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Go forward one frame </md-tooltip>
           </md-button>
           <md-button class="md-icon-button" @click="addFrame">
             <md-icon>add</md-icon>
+            <md-tooltip md-delay="1000" md-direction="bottom"> Add a new frame after current one </md-tooltip>
           </md-button>
         </div>
       </md-card-header>
@@ -498,6 +527,11 @@ export default {
 </script>
 
 <style scoped>
+.inline-centered {
+  margin-right: 3px;
+  margin-left: 3px;
+}
+
 .md-radio {
   display: flex;
 }
