@@ -75,15 +75,6 @@ export default {
       if (files.length > 0)
         this.binary = files[0]
     },
-    async abortUpdate() {
-      try {
-        this.$axios.get('/abortUpdate').then()
-        return true
-      } catch (error) {
-        console.error(error)
-        return false
-      }
-    },
     async update() {
       this.updateDialog = false
       let binary = this.binary
@@ -128,8 +119,6 @@ export default {
       }
 
       try {
-        await this.$axios.post('/beginUpdate')
-        await this.sleep(1000)
         let form = new FormData()
         form.append(this.selected, binary, this.selected)
         this.progress = 0
@@ -144,15 +133,12 @@ export default {
         if (response.data.includes('OK')) {
           this.info('Success', 'Successfully updated display', true)
           this.waitForPromiseSuccess(this.getStats).then()
-        } else {
+        } else
           this.error('Error', 'Failed to update display: ' + response.data)
-          await this.waitForPromiseSuccess(this.abortUpdate)
-        }
       } catch (error) {
         this.error('Error', 'Failed to update display: ' + error)
         this.progress = -1;
         console.error(error)
-        await this.waitForPromiseSuccess(this.abortUpdate)
       }
     },
     onUploadProgress(event) {

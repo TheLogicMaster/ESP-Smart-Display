@@ -1,5 +1,5 @@
 # ESP LED Matrix Display
-
+![GitHub](https://img.shields.io/github/license/TheLogicMaster/ESP-LED-Matrix-Display)
 ## About
 This project is intended to provide an graphically customizeable and functional firmware to drive LED Matrix panels using 
 ESP8266 based microcontrollers. It's powered by the [PxMatrix](https://github.com/2dom/PxMatrix) driver and is
@@ -18,20 +18,22 @@ is a placeholder until something clever comes along.
 * OTA Updating
 * Raw configuration editor
 * YouTube subscriber counter
+* Tetris Animation font
 
 ## Demo
+![GitHub Workflow Status](https://img.shields.io/github/workflow/status/TheLogicMaster/ESP-LED-Matrix-Display/Build%20Demo)
+
 A demo of the web dashboard is available [Here](https://thelogicmaster.github.io/ESP-LED-Matrix-Display/). Example data 
 is provided in place of the normal display API calls. Aside from configuration and image saving, the dashboard should
 be fully functional.
 
 ## Hardware
-ESP32 and ESP8266 are now fully supported, though the sunrise/weather features aren't availible to ESP32 yet, since the 
-WeatherStation library isn't ESP32 friendly at the moment. 4MB of RAM is required to use both the web dashboard
+ESP32 and ESP8266 are now fully supported. 4MB of RAM is required to use both the web dashboard
 and OTA updates. This was developed primarily on a P3 32x64 panel, but other sizes should be supported. Wiring is required to
 be like [this](https://github.com/2dom/PxMatrix#set-up-and-cabling). A photoresistor/resistor is supported on pin 
 A0 in [this](https://www.instructables.com/id/NodeMCU-With-LDR/) configuration to control the display brightness. There 
 are pre-configured Platformio environments for Wemos D1 Mini, NodeMCU V2, NodeMCU 32S, and the Wemos D1 Mini Lite. Pre-built update
-binaries are availible for D1 Mini and NodeMCU V2. The D1 Mini Lite has 1MB of flash memory, so OTA updates are not 
+binaries are availible for D1 Mini, NodeMCU 32S, and NodeMCU V2. The D1 Mini Lite has 1MB of flash memory, so OTA updates are not 
 supported and features like HTTPS and built-in images are disabled.
 
 ## Installation

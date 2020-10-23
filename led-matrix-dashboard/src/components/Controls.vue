@@ -24,7 +24,8 @@ export default {
       'Restart Display': {url: '/restart', tooltip: 'Restart the display'},
       'Delete all Images': {url: '/deleteAllImages', tooltip: 'Delete all custom images'},
       'Reset Display Configuration': {url: '/resetConfiguration', tooltip: 'Reset display configuration file'},
-      'Factory Reset Display': {url: '/factoryReset', tooltip: 'Reset display configuration and erase custom images'}
+      'Factory Reset Display': {url: '/factoryReset', tooltip: 'Reset display configuration and erase custom images'},
+      'Format Filesystem': {url: '/formatFilesystem', tooltip: 'Format display filesystem'}
     }
   }),
   methods: {

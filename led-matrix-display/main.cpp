@@ -42,7 +42,7 @@
 #define SHAPE_CIRCLE 2
 #define SHAPE_PIXEL 3
 #define STATE_NORMAL 0
-#define STATE_UPDATING 1
+#define STATE_DISABLED 1
 
 // Configuration
 #define ROUNDED_RECT_RADIUS 3 // The radius to use for rounded rectangles
@@ -161,8 +161,6 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <WiFiMulti.h>
-//#define sint16_t signed short
-//#define sint32_t signed long
 #else // ESP8266 Specific
 #include <ESPAsyncTCP.h>
 #include <LittleFS.h>
@@ -187,7 +185,7 @@
 #include "TinyIcons.h"
 #endif
 #if USE_SUNRISE
-#include <SunMoonCalc.h>
+#include "SunMoonCalc.h"
 #endif
 #if USE_TETRIS
 #include <TetrisMatrixDraw.h>
@@ -321,6 +319,8 @@ bool needsConfig; // If a configuration is needed
 bool needsUpdate; // If a full update is needed
 bool needsRestart; // If a system reboot is needed
 bool needsTimezone; // If the timezone needs to be set still
+bool needsFormat; // If a FS format is needed
+bool needsFactoryReset; // If a factory reset is needed
 uint8_t theHour12;
 uint8_t theHour;
 uint8_t theMinute;
@@ -335,6 +335,7 @@ time_t sunSetTime;
 uint8_t scanPattern;
 uint8_t muxPattern;
 uint8_t muxDelay;
+AsyncClient* finalClient; // Client to wait for closing before restart
 
 #ifdef ESP32
 #define P_LAT 22
@@ -433,6 +434,7 @@ uint16_t parseHexColorString(std::string s) {
 }
 
 void closeFiles() {
+    DEBUG("Closing widget files\n");
     for (uint i = 0; i < widgets.size(); i++)
         widgets[i].file.close();
 }
@@ -650,10 +652,20 @@ bool getConfig() {
 
 #pragma region Web Server
 
+void restartAfterDisconnect(AsyncWebServerRequest *request) {
+    needsRestart = true;
+    finalClient = request->client();
+}
+
 void closeConnection(AsyncWebServerRequest *request) {
     AsyncWebServerResponse *response = request->beginResponse(200);
     response->addHeader("Connection", "close");
     request->send(response);
+}
+
+void closeAndRestart(AsyncWebServerRequest *request) {
+    closeConnection(request);
+    restartAfterDisconnect(request);
 }
 
 void onStartAccessPoint(AsyncWiFiManager *wiFiManager) {
@@ -679,15 +691,6 @@ String getContentType(String filename) {
     else if (filename.endsWith(F(".json"))) 
         return F("text/json");
     return F("text/plain");
-}
-
-int getHeaderCacheVersion(AsyncWebServerRequest *request) {
-    if (!request->hasHeader(F("If-None-Match")))
-        return -1;
-    for (int i = 0; i < request->headers(); i++ )
-        if (request->headerName(i).equals(F("If-None-Match")))
-            return request->header(i).toInt();
-    return -1;
 }
 
 bool sendFile(AsyncWebServerRequest *request, String path, bool cache = true) {
@@ -794,24 +797,7 @@ void serveNotFound(AsyncWebServerRequest *request) {
 }
 
 void serveRestart(AsyncWebServerRequest *request) {
-    closeConnection(request);
-    needsRestart = true;
-}
-
-// Todo: Replace start and abort OTA functions with direct update functions
-void startOTA(AsyncWebServerRequest *request) {
-    state = STATE_UPDATING;
-    disableDisplay = true;
-    LittleFS.end();
-    request->send(200);
-}
-
-void abortOTA(AsyncWebServerRequest *request) {
-    state = STATE_NORMAL;
-    disableDisplay = false;
-    LittleFS.begin();
-    request->send(200);
-    needsUpdate = true;
+    closeAndRestart(request);
 }
 
 void serveStats(AsyncWebServerRequest *request) {
@@ -977,8 +963,7 @@ void serveImageData(AsyncWebServerRequest *request) {
 }
 
 void serveUploadImage(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-    for (uint i = 0; i < widgets.size(); i++)
-        widgets[i].file.close();
+    closeFiles();
     String imageFilename = "/images/" + request->arg("name");
 
     if (!index) {
@@ -1027,6 +1012,7 @@ void serveImage(AsyncWebServerRequest *request) {
 }
 
 void serveRenameImage(AsyncWebServerRequest *request) {
+    closeFiles();
     String name = request->arg(F("name"));
     String newName = request->arg(F("newName"));
     if (!LittleFS.exists("/images/" + name)) {
@@ -1045,8 +1031,7 @@ void serveRenameImage(AsyncWebServerRequest *request) {
 }
 
 void serveDeleteImage(AsyncWebServerRequest *request) {
-    for (uint i = 0; i < widgets.size(); i++)
-        widgets[i].file.close();
+    closeFiles();
     std::string name = request->arg(F("name")).c_str();
     std::map <std::string, FSImage> fsImageData = getFSImageData();
     fsImageData.erase(name);
@@ -1058,8 +1043,8 @@ void serveDeleteImage(AsyncWebServerRequest *request) {
 }
 
 void deleteAllImages() {
-    for (uint i = 0; i < widgets.size(); i++)
-        widgets[i].file.close();
+    DEBUG("Deleting all custom images\n");
+    closeFiles();
     writeDefaultImageData();
     Dir dir = getImageDir();
     LittleFS.rmdir(F("/images"));
@@ -1081,9 +1066,9 @@ void serveDeleteAllImages(AsyncWebServerRequest *request) {
 }
 
 void serveResetConfiguration(AsyncWebServerRequest *request) {
+    closeFiles();
     writeDefaultConfig();
-    closeConnection(request);
-    needsRestart = true;
+    closeAndRestart(request);
 }
 
 void serveOK(AsyncWebServerRequest *request) {
@@ -1091,23 +1076,33 @@ void serveOK(AsyncWebServerRequest *request) {
 }
 
 void serveFactoryReset(AsyncWebServerRequest *request) {
-    writeDefaultConfig();
-    deleteAllImages();
-    AsyncWiFiManager wifiManager(&server, &dnsServer);
-    wifiManager.resetSettings();
-    needsRestart = true;
-    closeConnection(request);
+    needsFactoryReset = true;
+    closeAndRestart(request);
+}
+
+void serveFormatFilesystem(AsyncWebServerRequest *request) {
+    needsFormat = true;
+    closeAndRestart(request);
 }
 
 void serveOTA(AsyncWebServerRequest *request) {
-    needsRestart = !Update.hasError();
-    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", needsRestart ? "OK" : String(Update.getError(), 10));
+    bool success = !Update.hasError();
+    if (!success) {
+        state = STATE_NORMAL;
+        disableDisplay = false;
+        LittleFS.begin();
+        needsUpdate = true;
+    } else
+        restartAfterDisconnect(request);
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", success ? "OK" : String(Update.getError(), 10));
     response->addHeader("Connection", "close");
     request->send(response);
 }
 
 void serveOTAUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
     if (!index) {
+        state = STATE_DISABLED;
+        disableDisplay = true;
 #ifdef ESP8266
         Update.runAsync(true);
 #endif
@@ -1130,7 +1125,7 @@ void serveOTAUpload(AsyncWebServerRequest *request, String filename, size_t inde
       Update.printError(Serial);
     if (final) {
       if(Update.end(true))
-        Serial.printf("Update Success: %uB\n", index+len);
+        Serial.printf("Update Success: %uB\n", index + len);
       else
         Update.printError(Serial);
     }
@@ -1170,8 +1165,6 @@ void setupWebserver() {
     server.addHandler(new AsyncCallbackJsonWebHandler("/config", serveSaveConfig, MAX_CONFIG_FILE_SIZE));
     server.on("/update", HTTP_POST, serveOTA, serveOTAUpload);
     server.on("/recovery", HTTP_GET, serveRecovery);
-    server.on("/abortUpdate", abortOTA);
-    server.on("/beginUpdate", startOTA);
     server.on("/fullRefresh", serveFullUpdate);
     server.on("/forceUpdate", serveForceUpdate);
     server.on("/refreshWeather", serveWeatherUpdate);
@@ -1187,6 +1180,7 @@ void setupWebserver() {
     server.on("/deleteAllImages", serveDeleteAllImages);
     server.on("/renameImage", serveRenameImage);
     server.on("/factoryReset", serveFactoryReset);
+    server.on("/formatFilesystem", serveFormatFilesystem);
     server.on("/resetConfiguration", serveResetConfiguration);
     server.serveStatic("/", LittleFS, "/", CACHE_DASHBOARD ? "no-cache" : NULL);
     server.onNotFound(serveNotFound);
@@ -2026,6 +2020,29 @@ void updateArduinoOTA() {
 #endif
 }
 
+void updateRestartFlags() {
+    if (needsRestart && (!finalClient || finalClient->disconnected())) {
+        if (needsFormat) {
+            closeFiles();
+            LittleFS.end();
+            state = STATE_DISABLED;
+            disableDisplay = true;
+            DEBUG("Formatting filesystem\n");
+            LittleFS.format();
+        }
+
+        if (needsFactoryReset) {
+            writeDefaultConfig();
+            deleteAllImages();
+            DEBUG("Erasing WiFi settings\n");
+            AsyncWiFiManager wifiManager(&server, &dnsServer);
+            wifiManager.resetSettings();
+        }
+        
+        ESP.restart();
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     Serial.println();
@@ -2124,6 +2141,7 @@ void setup() {
         display.showBuffer();
         needsConfig = true;
         while (needsConfig) {
+            updateRestartFlags();
             updateArduinoOTA();
             updateTime();
             yield();
@@ -2139,13 +2157,12 @@ void setup() {
 }
 
 void loop() {
-    if (needsRestart)
-        ESP.restart();
+    updateRestartFlags();
 
     switch (state) {
         default:
             Serial.printf("Unknown state: %i/n", state);
-        case STATE_UPDATING:
+        case STATE_DISABLED:
             break;
         case STATE_NORMAL:
             updateTime();
