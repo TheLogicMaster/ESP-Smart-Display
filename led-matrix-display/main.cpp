@@ -79,6 +79,9 @@
 #ifndef CACHE_DASHBOARD
 #define CACHE_DASHBOARD true // Disable for dashboard development, I guess
 #endif
+#ifndef USE_CORS
+#define USE_CORS false // CORS header is not needed in production
+#endif
 #ifndef USE_SUNRISE
 #define USE_SUNRISE true // Disable to save space if Sunrise brightness mode isn't needed
 #endif
@@ -394,7 +397,7 @@ const uint16_t MAGENTA = display.color565(255, 0, 255);
 RunningAverage brightnessAverage(BRIGHTNESS_ROLLING_AVG_SIZE);
 #endif
 
-DoubleResetDetector drd(10, 0);
+DoubleResetDetector* drd;
 AsyncWebServer server(80);
 DNSServer dnsServer;
 
@@ -655,6 +658,7 @@ void closeConnection(AsyncWebServerRequest *request) {
 
 void onStartAccessPoint(AsyncWiFiManager *wiFiManager) {
     Serial.println(F("Entering AP config mode"));
+    display.fillScreen(BLUE);
     display.setCursor(0, 0);
     display.println(F("Wifi"));
     display.println(F("Config"));
@@ -1158,6 +1162,8 @@ void serveRecovery(AsyncWebServerRequest *request) {
 }
 
 void setupWebserver() {
+    if (USE_CORS)
+        DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
     server.on("/", serveRoot);
     server.on("/index.html", serveRoot);
     server.on("/config", HTTP_GET, serveConfig);
@@ -1964,14 +1970,16 @@ void updateTime() {
             DEBUG("Set timezone\n");
         else
             DEBUG("Failed to set timezone\n");
-    }
         needsTimezone = false;
+    }
     if (!bootTime && timeStatus() == timeSet) 
         bootTime = timezone.tzTime(TIME_NOW, UTC_TIME);
     events(); // Handle NTP events
-    theHour12 = hourFormat12();
-    theHour = hour();
-    theMinute = minute();
+    if (timeStatus() == timeSet) {
+        theHour12 = hourFormat12();
+        theHour = hour();
+        theMinute = minute();
+    }
 #endif
 }
 
@@ -2022,6 +2030,7 @@ void setup() {
     Serial.begin(115200);
     Serial.println();
 
+    drd = new DoubleResetDetector(10, 0);
     display.begin(16);
 #ifdef ESP8266
     display_ticker.attach(0.002, display_updater);
@@ -2034,9 +2043,8 @@ void setup() {
     timerAlarmEnable(timer);;
 #endif
     display.setPanelsWidth(DISPLAY_PANELS);
-    display.fillScreen(GREEN);
+    display.fillScreen(BLUE);
     display.showBuffer();
-    display.fillScreen(GREEN);
 
     if (!LittleFS.begin() && !LittleFS.begin()) {
         display.fillScreen(BLUE);
@@ -2067,9 +2075,10 @@ void setup() {
 
     AsyncWiFiManager wifiManager(&server, &dnsServer);
     wifiManager.setAPCallback(onStartAccessPoint);
-
-    if (drd.detectDoubleReset()) {
+    
+    if (drd->detectDoubleReset()) {
         Serial.println(F("Double reset detected, entering config mode"));
+        wifiManager.setTryConnectDuringConfigPortal(false);
         wifiManager.startConfigPortal("LED Matrix Display");
     } else {
         Serial.println(F("Attemping to connect to network..."));
@@ -2079,8 +2088,16 @@ void setup() {
         display.showBuffer();
         wifiManager.autoConnect("LED Matrix Display", NULL, 5);
     }
+    
+    display.fillScreen(BLUE);
+    display.setCursor(0, 0);
+    display.println(F("Reset to"));
+    display.println(F("configure"));
+    display.println(F("WiFi"));
+    display.showBuffer();
+    delay(2000); // Delay for DRD activation
 
-    drd.stop();
+    drd->stop();
     server.reset();
     Serial.print(F("Connected to network with IP: "));
     Serial.println(WiFi.localIP());
