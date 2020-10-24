@@ -149,13 +149,14 @@
 
 // Source files
 #ifdef ESP32 // ESP32 Specific
-#include <Update.h>
 #include <AsyncTCP.h>
 #include <esp_wifi.h>
-#include <FS.h>
-#include <SPIFFS.h>
-#define LittleFS SPIFFS
+#include "CustomUpdate.h"
+CustomUpdateClass CustomUpdate("dashboard");
 #define Dir File
+#include "CustomSPIFFS.h"
+CustomSPIFFSFS UserFS;
+CustomSPIFFSFS DashboardFS;
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <WiFiClientSecure.h>
@@ -164,6 +165,10 @@
 #else // ESP8266 Specific
 #include <ESPAsyncTCP.h>
 #include <LittleFS.h>
+#define DashboardFS LittleFS
+#define CustomUpdate Update
+// Both SPIFFS partitions are the same size for simplicity
+FS UserFS = FS(FSImplPtr(new littlefs_impl::LittleFSImpl(FS_PHYS_ADDR + FS_PHYS_SIZE, FS_PHYS_SIZE, FS_PHYS_PAGE, FS_PHYS_BLOCK, 5)));
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #endif
@@ -415,8 +420,8 @@ ADC_MODE(ADC_VCC);
 #pragma region Configuration
 
 void writeDefaultConfig() {
-    LittleFS.remove("/config.json");
-    File file = LittleFS.open("/config.json", "w");
+    UserFS.remove("/config.json");
+    File file = UserFS.open("/config.json", "w");
     file.print(F("{\"widgets\":[{\"xOff\":17,\"yOff\":11,\"type\":4,\"transparent\":false,\"font\":2,\"content\":\"Hello\",\"colors\":[\"0x000000\"],\"width\":30,\"height\":8,\"backgroundColor\":\"0x00FFFF\"}],\"brightnessMode\":0,\"brightnessLower\":1,\"brightnessUpper\":100,\"backgroundColor\":\"0x00FFFF\",\"timezone\":\"America/Detroit\",\"metric\":false,\"weatherKey\":\"\",\"weatherLocation\":\"5014227\"}"));
     file.close();
 }
@@ -611,7 +616,7 @@ bool parseConfig(JsonVariant& json, String& errorString) {
 }
 
 bool getConfig() {
-    File configFile = LittleFS.open("/config.json", "r");
+    File configFile = UserFS.open("/config.json", "r");
     if (!configFile) {
         Serial.println(F("Failed to open config file"));
         return false;
@@ -693,10 +698,10 @@ String getContentType(String filename) {
     return F("text/plain");
 }
 
-bool sendFile(AsyncWebServerRequest *request, String path, bool cache = true) {
+bool sendFile(AsyncWebServerRequest *request, FS& fs, String path, bool cache = true) {
     if (path.endsWith(F("/")))
         return false;
-    AsyncWebServerResponse *response = request->beginResponse(LittleFS, path, getContentType(path));
+    AsyncWebServerResponse *response = request->beginResponse(fs, path, getContentType(path));
     if (!response)
         return false;
     request->send(response);
@@ -707,15 +712,15 @@ static const char noDashboardIndex[] PROGMEM = R"(
   <!DOCTYPE html>
   <html>
   <body>
-  <h1>Dashboard is not installed</h1>
-  <a href="https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest" target="_blank">Get Dashboard</a>
-  <a href="/recovery">Install Dashboard</a>
+  <h1>DashboardFS is not installed</h1>
+  <a href="https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest" target="_blank">Get DashboardFS</a>
+  <a href="/recovery">Install DashboardFS</a>
   </body>
   </html>
 )";
 
 void serveRoot(AsyncWebServerRequest *request) {
-    if (!sendFile(request, F("/index.html")))
+    if (!sendFile(request, DashboardFS, F("/index.html")))
         request->send(200, "text/html", noDashboardIndex);
 }
 
@@ -733,8 +738,8 @@ void serveSaveConfig(AsyncWebServerRequest *request, JsonVariant &json) {
 
         String error;
         if (parseConfig(json, error)) {
-            LittleFS.remove("/config.json");
-            File file = LittleFS.open("/config.json", "w");
+            UserFS.remove("/config.json");
+            File file = UserFS.open("/config.json", "w");
             serializeJson(json, file);
             file.close();
             Serial.println(F("Successfully updated config file"));
@@ -746,9 +751,9 @@ void serveSaveConfig(AsyncWebServerRequest *request, JsonVariant &json) {
 }
 
 void serveConfig(AsyncWebServerRequest *request) {
-    if (!sendFile(request, F("/config.json"), false)) {
+    if (!sendFile(request, UserFS, F("/config.json"), false)) {
         writeDefaultConfig();
-        if (!sendFile(request, F("/config.json"), false))
+        if (!sendFile(request, UserFS, F("/config.json"), false))
             request->send(500, F("text/plain"), F("Config file error"));
     }
 }
@@ -792,7 +797,7 @@ void serveNotFound(AsyncWebServerRequest *request) {
     }
   
     DEBUG("Not found: %s %s %s\n", request->url().c_str(), request->contentType().c_str(), request->methodToString());
-    if (!sendFile(request, request->url()))
+    if (!sendFile(request, DashboardFS, request->url()))
         request->send(404, "text/html", F("Not found"));
 }
 
@@ -826,7 +831,7 @@ void serveStats(AsyncWebServerRequest *request) {
     json["resetReason"] = strcpy(reason, ESP.getResetReason().c_str());
     json["fragmentation"] = ESP.getHeapFragmentation();
     FSInfo info;
-    LittleFS.info(info);
+    UserFS.info(info);
     json["filesystemUsed"] = info.usedBytes;
     json["filesystemTotal"] = info.totalBytes;
     json["maxOpenFiles"] = info.maxOpenFiles;
@@ -840,8 +845,8 @@ void serveStats(AsyncWebServerRequest *request) {
     json["fragmentation"] = (uint)((ESP.getFreeHeap() - ESP.getMaxAllocHeap()) / (double)ESP.getFreeHeap() * 100);
     json["memoryTotal"] = ESP.getHeapSize();
     json["lowestMemory"] = ESP.getMinFreeHeap();
-    json["filesystemUsed"] = LittleFS.usedBytes();
-    json["filesystemTotal"] = LittleFS.totalBytes();
+    json["filesystemUsed"] = UserFS.usedBytes();
+    json["filesystemTotal"] = UserFS.totalBytes();
     json["maxPathLength"] = 31;
 #endif
     json["memoryFree"] = ESP.getFreeHeap();
@@ -857,7 +862,7 @@ void serveStats(AsyncWebServerRequest *request) {
 }
 
 void writeDefaultImageData() {
-    File dataFile = LittleFS.open(F("/imageData.json"), "w");
+    File dataFile = UserFS.open(F("/imageData.json"), "w");
     dataFile.print("{}");
     dataFile.close();
 }
@@ -865,11 +870,11 @@ void writeDefaultImageData() {
 std::map <std::string, FSImage> getFSImageData() {
     std::map <std::string, FSImage> data;
 
-    File dataFile = LittleFS.open("/imageData.json", "r");
+    File dataFile = UserFS.open("/imageData.json", "r");
     if (!dataFile) {
         Serial.println(F("Failed to open image data file, writing default"));
         writeDefaultImageData();
-        dataFile = LittleFS.open("/imageData.json", "r");
+        dataFile = UserFS.open("/imageData.json", "r");
     }
 
     size_t size = dataFile.size();
@@ -877,7 +882,7 @@ std::map <std::string, FSImage> getFSImageData() {
         Serial.printf("Image data file size is too large(%i), replacing with default...\n", size);
         dataFile.close();
         writeDefaultImageData();
-        dataFile = LittleFS.open("/imageData.json", "r");
+        dataFile = UserFS.open("/imageData.json", "r");
     }
 
     std::unique_ptr<char[]> buf(new char[size]);
@@ -894,7 +899,7 @@ std::map <std::string, FSImage> getFSImageData() {
 }
 
 void writeFSImageData(std::map <std::string, FSImage> data) {
-    File dataFile = LittleFS.open("/imageData.json", "w");
+    File dataFile = UserFS.open("/imageData.json", "w");
     if (!dataFile) {
         Serial.println(F("Failed to open Image Data file"));
         return;
@@ -913,12 +918,12 @@ void writeFSImageData(std::map <std::string, FSImage> data) {
 }
 
 Dir getImageDir() {
-    if (!LittleFS.exists("/images"))
-        LittleFS.mkdir("/images");
+    if (!UserFS.exists("/images"))
+        UserFS.mkdir("/images");
 #ifdef ESP32
-    return LittleFS.open("/images");
+    return UserFS.open("/images");
 #else
-    return LittleFS.openDir("/images");
+    return UserFS.openDir("/images");
 #endif
 }
 
@@ -968,7 +973,7 @@ void serveUploadImage(AsyncWebServerRequest *request, String filename, size_t in
 
     if (!index) {
         DEBUG("Uploading Image: %s\n", request->arg("name").c_str());
-        request->_tempFile = LittleFS.open(imageFilename, "w");
+        request->_tempFile = UserFS.open(imageFilename, "w");
     }
 
     if (request->_tempFile && request->_tempFile.write(data, len) != len) {
@@ -986,8 +991,8 @@ void serveUploadImage(AsyncWebServerRequest *request, String filename, size_t in
             needsUpdate = true;
         } else {
             request->send(400, F("text/plain"), F("Failed to save image"));
-            if (LittleFS.exists(imageFilename))
-                LittleFS.remove(imageFilename);
+            if (UserFS.exists(imageFilename))
+                UserFS.remove(imageFilename);
         }
     }
 }
@@ -1004,7 +1009,7 @@ void serveImage(AsyncWebServerRequest *request) {
                     progmemImages[progmem].height * progmemImages[progmem].length;
         request->send_P(200, F("application/binary"), (uint8_t*) progmemImages[progmem].data, size);
     } else {
-        if (!sendFile(request, "/images/" + image, false)) {
+        if (!sendFile(request, UserFS, "/images/" + image, false)) {
             DEBUG("Image doesn't exist: %s\n", image.c_str());
             request->send(404);
         }
@@ -1015,13 +1020,13 @@ void serveRenameImage(AsyncWebServerRequest *request) {
     closeFiles();
     String name = request->arg(F("name"));
     String newName = request->arg(F("newName"));
-    if (!LittleFS.exists("/images/" + name)) {
+    if (!UserFS.exists("/images/" + name)) {
         DEBUG("Image to rename doesn't exist: %s\n", name.c_str());
         request->send(404);
     } else {
-        if (LittleFS.exists("/images/" + newName))
-            LittleFS.remove("/images/" + newName);
-        LittleFS.rename("/images/" + name, "/images/" + newName);
+        if (UserFS.exists("/images/" + newName))
+            UserFS.remove("/images/" + newName);
+        UserFS.rename("/images/" + name, "/images/" + newName);
         std::map <std::string, FSImage> fsImageData = getFSImageData();
         fsImageData[newName.c_str()] = fsImageData[name.c_str()];
         fsImageData.erase(name.c_str());
@@ -1036,8 +1041,8 @@ void serveDeleteImage(AsyncWebServerRequest *request) {
     std::map <std::string, FSImage> fsImageData = getFSImageData();
     fsImageData.erase(name);
     std::string filename = "/images/" + name;
-    if (LittleFS.exists(filename.c_str()))
-        LittleFS.remove(filename.c_str());
+    if (UserFS.exists(filename.c_str()))
+        UserFS.remove(filename.c_str());
     writeFSImageData(fsImageData);
     request->send(200);
 }
@@ -1047,8 +1052,8 @@ void deleteAllImages() {
     closeFiles();
     writeDefaultImageData();
     Dir dir = getImageDir();
-    LittleFS.rmdir(F("/images"));
-    LittleFS.mkdir(F("/images"));
+    UserFS.rmdir(F("/images"));
+    UserFS.mkdir(F("/images"));
 #ifdef ESP8266
     std::vector <String> files;
     while (dir.next()) {
@@ -1056,7 +1061,7 @@ void deleteAllImages() {
         files.push_back(dir.fileName());
     }
     for (const auto &file: files)
-        LittleFS.remove("/images/" + file);
+        UserFS.remove("/images/" + file);
 #endif
 }
 
@@ -1086,15 +1091,15 @@ void serveFormatFilesystem(AsyncWebServerRequest *request) {
 }
 
 void serveOTA(AsyncWebServerRequest *request) {
-    bool success = !Update.hasError();
+    bool success = !CustomUpdate.hasError();
     if (!success) {
         state = STATE_NORMAL;
         disableDisplay = false;
-        LittleFS.begin();
+        DashboardFS.begin();
         needsUpdate = true;
     } else
         restartAfterDisconnect(request);
-    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", success ? "OK" : String(Update.getError(), 10));
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", success ? "OK" : String(CustomUpdate.getError(), 10));
     response->addHeader("Connection", "close");
     request->send(response);
 }
@@ -1104,30 +1109,30 @@ void serveOTAUpload(AsyncWebServerRequest *request, String filename, size_t inde
         state = STATE_DISABLED;
         disableDisplay = true;
 #ifdef ESP8266
-        Update.runAsync(true);
+        CustomUpdate.runAsync(true);
 #endif
         if (filename.startsWith("firmware")) {
             Serial.println("Starting Firmware update");
-            if(!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000))
-                Update.printError(Serial);
+            if(!CustomUpdate.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000))
+                CustomUpdate.printError(Serial);
         } else {
             Serial.println("Starting Filesystem update");
-            LittleFS.end();
+            DashboardFS.end();
 #ifdef ESP8266
-            if (!Update.begin((size_t) &_FS_end - (size_t) &_FS_start, U_FS))
+            if (!CustomUpdate.begin((size_t) &_FS_end - (size_t) &_FS_start, U_FS))
 #else
-            if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS))
+            if (!CustomUpdate.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS))
 #endif
-                Update.printError(Serial);
+                CustomUpdate.printError(Serial);
         }
     }
-    if (!Update.hasError() && Update.write(data, len) != len)
-      Update.printError(Serial);
+    if (!CustomUpdate.hasError() && CustomUpdate.write(data, len) != len)
+      CustomUpdate.printError(Serial);
     if (final) {
-      if(Update.end(true))
+      if(CustomUpdate.end(true))
         Serial.printf("Update Success: %uB\n", index + len);
       else
-        Update.printError(Serial);
+        CustomUpdate.printError(Serial);
     }
 }
 
@@ -1145,9 +1150,9 @@ static const char recoveryIndex[] PROGMEM = R"(<!DOCTYPE html>
          <input type='submit' value='Install Firmware'>
      </form>
      <form method='POST' action='/update' enctype='multipart/form-data'>
-         Dashboard:<br>
+         DashboardFS:<br>
          <input type='file' accept='.bin,.bin.gz' name='filesystem'>
-         <input type='submit' value='Install Dashboard'>
+         <input type='submit' value='Install DashboardFS'>
      </form>
      </body>
      </html>)";
@@ -1182,7 +1187,7 @@ void setupWebserver() {
     server.on("/factoryReset", serveFactoryReset);
     server.on("/formatFilesystem", serveFormatFilesystem);
     server.on("/resetConfiguration", serveResetConfiguration);
-    server.serveStatic("/", LittleFS, "/", CACHE_DASHBOARD ? "no-cache" : NULL);
+    server.serveStatic("/", DashboardFS, "/", CACHE_DASHBOARD ? "no-cache" : NULL);
     server.onNotFound(serveNotFound);
     Serial.println(F("Starting configuration webserver..."));
     server.begin();
@@ -1232,13 +1237,13 @@ void drawImage(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width,
 void drawImageFs(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset,
                       const char name[], std::vector<uint16_t> alphaColors, bool transparent, File &file) {
     if (!file) {
-        if (!LittleFS.exists(name)) {
+        if (!UserFS.exists(name)) {
             Serial.print(F("Couldn't find image to draw for: "));
             Serial.println(name);
             return;
         }
         Serial.printf("Opening File: %s\n", name);
-        file = LittleFS.open(name, "r");
+        file = UserFS.open(name, "r");
         if (!file) {
             Serial.printf("Failed to open image: %s\n", name);
             return;
@@ -1842,7 +1847,7 @@ void updateScreen(bool fullUpdate) {
         else {
             drawScreen(displayBuffer, fullUpdate, true, false);
 #if DEBUG_TRANSPARENCY
-            File f = LittleFS.open("/images/Transparency Buffer", "w");
+            File f = UserFS.open("/images/Transparency Buffer", "w");
             if (vertical)
                 for (uint y = 0; y < DISPLAY_HEIGHT; y++)
                     for (uint x = 0; x < DISPLAY_WIDTH; x++) 
@@ -1986,7 +1991,7 @@ void setupArduinoOTA() {
       type = "sketch";
     } else {
       type = "filesystem";
-      LittleFS.end();
+      DashboardFS.end();
     }
     Serial.println("Start updating " + type);
   });
@@ -2022,21 +2027,22 @@ void updateArduinoOTA() {
 
 void updateRestartFlags() {
     if (needsRestart && (!finalClient || finalClient->disconnected())) {
-        if (needsFormat) {
+        if (needsFormat || needsFactoryReset) {
+            DEBUG("Formatting user filesystem\n");
             closeFiles();
-            LittleFS.end();
+            UserFS.end();
             state = STATE_DISABLED;
             disableDisplay = true;
-            DEBUG("Formatting filesystem\n");
-            LittleFS.format();
+            UserFS.format();
         }
 
         if (needsFactoryReset) {
-            writeDefaultConfig();
-            deleteAllImages();
             DEBUG("Erasing WiFi settings\n");
-            AsyncWiFiManager wifiManager(&server, &dnsServer);
-            wifiManager.resetSettings();
+#ifdef ESP32
+            WiFi.disconnect(false, true);
+#else
+            ESP.eraseConfig();
+#endif
         }
         
         ESP.restart();
@@ -2063,7 +2069,14 @@ void setup() {
     display.fillScreen(BLUE);
     display.showBuffer();
 
-    if (!LittleFS.begin() && !LittleFS.begin()) {
+#ifdef ESP32
+    if (!DashboardFS.begin(false, "dashboard", "/dash"))
+#else
+    if (!DashboardFS.begin())
+#endif
+        Serial.println(F("Failed to initalize dashboard"));
+
+    if (!UserFS.begin()) {
         display.fillScreen(BLUE);
         display.println(F("FS ERROR"));
         Serial.println(F("Failed to open filesystem"));
@@ -2073,19 +2086,19 @@ void setup() {
         display.setCursor(0, 0);
         display.println(F("Formatting"));
         display.println(F("Display..."));
-        Serial.println(F("Formatting Display"));
+        Serial.println(F("Formatting filesystem"));
         display.showBuffer();
         delay(3000);
         display.fillScreen(0);
         display.showBuffer();
-        LittleFS.format();
-        LittleFS.begin();
+        UserFS.format();
+        UserFS.begin();
         needsConfig = true;
     }
-    File versionFile = LittleFS.open("/version.txt", "r");
+    File versionFile = DashboardFS.open("/version.txt", "r");
     if (versionFile) {
         dashboardVersion = versionFile.parseInt();
-       versionFile.close();
+        versionFile.close();
     }
     else
         Serial.println(F("Failed to read version file."));
@@ -2098,14 +2111,25 @@ void setup() {
         wifiManager.setTryConnectDuringConfigPortal(false);
         wifiManager.startConfigPortal("LED Matrix Display");
     } else {
-        Serial.println(F("Attemping to connect to network..."));
-        display.fillScreen(BLUE);
-        display.setCursor(0, 0);
-        display.print(F("Connecting..."));
-        display.showBuffer();
-        wifiManager.autoConnect("LED Matrix Display", NULL, 5);
+#ifdef ESP32
+        WiFi.enableSTA(true);
+        wifi_config_t conf;
+        esp_err_t error = esp_wifi_get_config(WIFI_IF_STA, &conf);
+        if (!error && strlen(reinterpret_cast<char*>(conf.sta.ssid))) {
+#else
+        if (true) {
+#endif
+            Serial.println(F("Attemping to connect to network..."));
+            display.fillScreen(BLUE);
+            display.setCursor(0, 0);
+            display.print(F("Connecting..."));
+            display.showBuffer();
+            wifiManager.autoConnect("LED Matrix Display", NULL, 5);
+        } else {
+            wifiManager.setTryConnectDuringConfigPortal(false);
+            wifiManager.startConfigPortal("LED Matrix Display");
+        }
     }
-    
     display.fillScreen(BLUE);
     display.setCursor(0, 0);
     display.println(F("Reset to"));
@@ -2127,7 +2151,7 @@ void setup() {
 
     // Development FS stuff
     //writeDefaultConfig();
-    //LittleFS.remove("/config.json");
+    //DashboardFS.remove("/config.json");
 
 #if USE_NTP
     timezone.setDefault();
