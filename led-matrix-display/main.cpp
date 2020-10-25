@@ -274,6 +274,11 @@ public:
     }
 };
 
+std::map <std::string, FSImage> builtinImages = {
+                                                {"blm", {64, 32, 36}},
+                                                {"weather", {64, 32, 1}}
+                                                };
+
 std::map <std::string, ProgmemImage> progmemImages = {
 #if USE_PROGMEM_IMAGES
                                                      {"taz",  {23, 28, 1,  IMAGE_UINT16, taz}},
@@ -931,7 +936,7 @@ void serveImageData(AsyncWebServerRequest *request) {
     Dir imageDir = getImageDir();
     std::map <std::string, FSImage> fsImageData = getFSImageData();
 
-    size_t size = 100 + (progmemImages.size() + fsImageData.size()) * 100;
+    size_t size = 100 + (progmemImages.size() + fsImageData.size() + builtinImages.size()) * 100;
     DynamicJsonDocument doc(size);
 
 #if DEBUG_TRANSPARENCY
@@ -953,6 +958,14 @@ void serveImageData(AsyncWebServerRequest *request) {
         o["type"] = entry.second.type;
         o["progmem"] = true;
         }
+    
+    for (auto const &entry : builtinImages) {
+        JsonObject o = doc.createNestedObject(entry.first.c_str());
+        o["width"] = entry.second.width;
+        o["height"] = entry.second.height;
+        o["length"] = entry.second.length;
+        o["progmem"] = true;
+    }
 
     for (auto const &entry : fsImageData) {
         JsonObject o = doc.createNestedObject(entry.first.c_str());
@@ -1001,8 +1014,9 @@ void serveImage(AsyncWebServerRequest *request) {
     String image = request->arg(F("image"));
     if (image.endsWith(F("_P"))) {
         std::string progmem = std::string(image.substring(0, image.length() - 2).c_str());
-        if (progmemImages.count(progmem) < 1) {
-            request->send(404);
+        if (progmemImages.count(progmem) == 0) {
+            if (!sendFile(request, DashboardFS, ("/images/" + progmem).c_str()))
+                request->send(404);
             return;
         }
         size_t size = (progmemImages[progmem].type == IMAGE_GIMP ? 4 : 2) * progmemImages[progmem].width *
@@ -1048,6 +1062,7 @@ void serveDeleteImage(AsyncWebServerRequest *request) {
 }
 
 void deleteAllImages() {
+    // Todo: Ensure files are all deleted
     DEBUG("Deleting all custom images\n");
     closeFiles();
     writeDefaultImageData();
@@ -1234,16 +1249,16 @@ void drawImage(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width,
     }
 }
 
-void drawImageFs(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset,
+void drawImageFs(Adafruit_GFX &d, FS fs, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset,
                       const char name[], std::vector<uint16_t> alphaColors, bool transparent, File &file) {
     if (!file) {
-        if (!UserFS.exists(name)) {
+        if (!fs.exists(name)) {
             Serial.print(F("Couldn't find image to draw for: "));
             Serial.println(name);
             return;
         }
         Serial.printf("Opening File: %s\n", name);
-        file = UserFS.open(name, "r");
+        file = fs.open(name, "r");
         if (!file) {
             Serial.printf("Failed to open image: %s\n", name);
             return;
@@ -1742,28 +1757,32 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
 
     switch (widget.type) {
         case WIDGET_PROGMEM_IMAGE:
-            switch (progmemImages[widget.content].type) {
-                case IMAGE_UINT8:
-                case IMAGE_UINT16:
-                    drawImage(d, widget.xOff + (widget.width - progmemImages[widget.content].width) / 2,
-                                    widget.yOff + (widget.height - progmemImages[widget.content].height) / 2,
-                                    progmemImages[widget.content].width, progmemImages[widget.content].height,
-                                    widget.state + widget.offset, (uint8_t *) progmemImages[widget.content].data,
-                                    widget.colors, widget.transparent, progmemImages[widget.content].type == IMAGE_UINT16);
-                    break;
-                case IMAGE_GIMP:
-                    drawGimpImage(d, widget.xOff + (widget.width - progmemImages[widget.content].width) / 2,
-                                  widget.yOff + (widget.height - progmemImages[widget.content].height) / 2,
-                                  progmemImages[widget.content].width, progmemImages[widget.content].height,
-                                  widget.colors, widget.transparent, (char *) progmemImages[widget.content].data);
-                    break;
-                default:
-                    Serial.println(F("Unknown image type"));
-                    break;
-            }
+            if (builtinImages.count(widget.content) > 0)
+                drawImageFs(d, DashboardFS, widget.xOff, widget.yOff, widget.width, widget.height, widget.state + widget.offset,
+                             ("/images/" + widget.content).c_str(), widget.colors, widget.transparent, widget.file);
+            else
+                switch (progmemImages[widget.content].type) {
+                    case IMAGE_UINT8:
+                    case IMAGE_UINT16:
+                        drawImage(d, widget.xOff + (widget.width - progmemImages[widget.content].width) / 2,
+                                        widget.yOff + (widget.height - progmemImages[widget.content].height) / 2,
+                                        progmemImages[widget.content].width, progmemImages[widget.content].height,
+                                        widget.state + widget.offset, (uint8_t *) progmemImages[widget.content].data,
+                                        widget.colors, widget.transparent, progmemImages[widget.content].type == IMAGE_UINT16);
+                        break;
+                    case IMAGE_GIMP:
+                        drawGimpImage(d, widget.xOff + (widget.width - progmemImages[widget.content].width) / 2,
+                                      widget.yOff + (widget.height - progmemImages[widget.content].height) / 2,
+                                      progmemImages[widget.content].width, progmemImages[widget.content].height,
+                                      widget.colors, widget.transparent, (char *) progmemImages[widget.content].data);
+                        break;
+                    default:
+                        Serial.println(F("Unknown image type"));
+                        break;
+                }
             break;
         case WIDGET_FS_IMAGE:
-            drawImageFs(d, widget.xOff, widget.yOff, widget.width, widget.height, widget.state + widget.offset,
+            drawImageFs(d, UserFS, widget.xOff, widget.yOff, widget.width, widget.height, widget.state + widget.offset,
                              ("/images/" + widget.content).c_str(), widget.colors, widget.transparent, widget.file);
             break;
         case WIDGET_ANALOG_CLOCK:
