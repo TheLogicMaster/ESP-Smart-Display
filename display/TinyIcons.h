@@ -17,7 +17,7 @@
 
 #define TI_PIXELS TI_COLS * TI_ROWS
 
-void TIDrawIcon(Adafruit_GFX& d, uint16_t id, uint8_t x, uint8_t y, uint8_t frame, bool daytime, bool transparent, uint16_t backgroundColor);
+void TIDrawIcon(Adafruit_GFX& d, uint16_t id, uint8_t x, uint8_t y, uint8_t frame, bool daytime, bool transparent, uint16_t backgroundColor, bool monochrome);
 
 #endif
 

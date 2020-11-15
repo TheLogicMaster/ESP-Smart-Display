@@ -11,7 +11,7 @@ jobs:
 
       - name: Install and Build 🔧
         run: |
-          cd ./led-matrix-dashboard
+          cd ./dashboard
           npm install
           npm run build
           cp -r ./demo-assets/* ./dist
@@ -23,5 +23,5 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: gh-pages # The branch the action should deploy to.
-          FOLDER: led-matrix-dashboard/dist # The folder the action should deploy.
+          FOLDER: dashboard/dist # The folder the action should deploy.
           CLEAN: true # Automatically remove deleted files from the deploy branch 

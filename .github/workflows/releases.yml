@@ -1,7 +1,7 @@
 on:
   push:
     tags:
-    - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+    - 'v*'
 
 name: Upload Release Assets
 
@@ -31,16 +31,16 @@ jobs:
     
       - name: Build PlatformIO Binaries
         run: |
-          platformio run -e nodemcuv2-32x64 -e d1-mini-32x64 -e nodemcu-32s-32x64
-          platformio run -e nodemcuv2-32x64 -e nodemcu-32s-32x64 -t buildfs
-          mv ./.pio/build/nodemcuv2-32x64/firmware.bin ./firmware-nodemcuv2-32x64-${{ steps.get_version.outputs.VERSION }}.bin
-          mv ./.pio/build/nodemcu-32s-32x64/firmware.bin ./firmware-nodemcu-32s-32x64-${{ steps.get_version.outputs.VERSION }}.bin
-          mv ./.pio/build/d1-mini-32x64/firmware.bin ./firmware-d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin
-          mv ./.pio/build/nodemcuv2-32x64/littlefs.bin ./fs-esp8266-${{ steps.get_version.outputs.VERSION }}.bin
-          mv ./.pio/build/nodemcu-32s-32x64/spiffs.bin ./fs-esp32-${{ steps.get_version.outputs.VERSION }}.bin
-          ./combine-binaries-esp8266.sh firmware-nodemcuv2-32x64-${{ steps.get_version.outputs.VERSION }}.bin fs-esp8266-${{ steps.get_version.outputs.VERSION }}.bin ./nodemcuv2-32x64-${{ steps.get_version.outputs.VERSION }}.bin
-          ./combine-binaries-esp8266.sh firmware-d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin fs-esp8266-${{ steps.get_version.outputs.VERSION }}.bin d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin
-          ./combine-binaries-esp32.sh firmware-nodemcu-32s-32x64-${{ steps.get_version.outputs.VERSION }}.bin fs-esp32-${{ steps.get_version.outputs.VERSION }}.bin nodemcu-32s-32x64-${{ steps.get_version.outputs.VERSION }}.bin
+          platformio run -e esp8266-pxmatrix-4mb-32x64 -e esp32-pxmatrix-4mb-32x64 -e esp8266-ssd1306-4mb-128x64
+          platformio run -e esp8266-pxmatrix-4mb-32x64 -e esp32-pxmatrix-4mb-32x64 -t buildfs
+          mv ./.pio/build/esp8266-ssd1306-4mb-128x64/firmware.bin ./firmware-esp8266-ssd1306-4mb-128x64-${{ steps.get_version.outputs.VERSION }}.bin
+          mv ./.pio/build/esp8266-pxmatrix-4mb-32x64/firmware.bin ./firmware-esp8266-pxmatrix-4mb-32x64-${{ steps.get_version.outputs.VERSION }}.bin
+          mv ./.pio/build/esp32-pxmatrix-4mb-32x64/firmware.bin ./firmware-esp32-pxmatrix-4mb-32x64-${{ steps.get_version.outputs.VERSION }}.bin
+          mv ./.pio/build/esp8266-pxmatrix-4mb-32x64/littlefs.bin ./fs-esp8266-${{ steps.get_version.outputs.VERSION }}.bin
+          mv ./.pio/build/esp32-pxmatrix-4mb-32x64/spiffs.bin ./fs-esp32-${{ steps.get_version.outputs.VERSION }}.bin
+          ./combine-binaries-esp8266.sh firmware-esp8266-ssd1306-4mb-128x64-${{ steps.get_version.outputs.VERSION }}.bin fs-esp8266-${{ steps.get_version.outputs.VERSION }}.bin ./esp8266-ssd1306-4mb-128x64-${{ steps.get_version.outputs.VERSION }}.bin
+          ./combine-binaries-esp8266.sh firmware-esp8266-pxmatrix-4mb-32x64-${{ steps.get_version.outputs.VERSION }}.bin fs-esp8266-${{ steps.get_version.outputs.VERSION }}.bin ./esp8266-pxmatrix-4mb-32x64-${{ steps.get_version.outputs.VERSION }}.bin
+          ./combine-binaries-esp32.sh firmware-esp32-pxmatrix-4mb-32x64-${{ steps.get_version.outputs.VERSION }}.bin fs-esp32-${{ steps.get_version.outputs.VERSION }}.bin esp32-pxmatrix-4mb-32x64-${{ steps.get_version.outputs.VERSION }}.bin
           
       - name: Create Release
         id: create_release
@@ -57,11 +57,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          hub release edit -a ./firmware-nodemcuv2-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
-          hub release edit -a nodemcuv2-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
-          hub release edit -a ./firmware-d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
-          hub release edit -a d1-mini-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
-          hub release edit -a ./firmware-nodemcu-32s-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
-          hub release edit -a nodemcu-32s-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
+          hub release edit -a ./firmware-esp8266-ssd1306-4mb-128x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
+          hub release edit -a esp8266-ssd1306-4mb-128x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
+          hub release edit -a ./firmware-esp8266-pxmatrix-4mb-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
+          hub release edit -a esp8266-pxmatrix-4mb-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
+          hub release edit -a ./firmware-esp32-pxmatrix-4mb-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
+          hub release edit -a esp32-pxmatrix-4mb-32x64-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
           hub release edit -a ./fs-esp32-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}
           hub release edit -a ./fs-esp8266-${{ steps.get_version.outputs.VERSION }}.bin -m "" ${{ steps.get_version.outputs.VERSION }}

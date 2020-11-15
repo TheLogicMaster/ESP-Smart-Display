@@ -43,6 +43,13 @@
 #define SHAPE_PIXEL 3
 #define STATE_NORMAL 0
 #define STATE_DISABLED 1
+#define IMAGE_ANIMATION_SLIDESHOW 0
+#define IMAGE_ANIMATION_SCROLL_LEFT 1
+#define IMAGE_ANIMATION_SCROLL_RIGHT 2
+#define IMAGE_ANIMATION_SCROLL_UP 3
+#define IMAGE_ANIMATION_SCROLL_DOWN 4
+#define DISPLAY_PXMATRIX 0
+#define DISPLAY_SSD1306 1
 
 // Configuration
 #define ROUNDED_RECT_RADIUS 3 // The radius to use for rounded rectangles
@@ -64,6 +71,9 @@
 #define WEATHER_TIMEOUT 10000 // The timeout for weather API requests in ms
 
 // Configuration Values
+#ifndef DISPLAY_TYPE
+#define DISPLAY_TYPE DISPLAY_PXMATRIX
+#endif
 #ifndef USE_BRIGHTNESS_SENSOR
 #define USE_BRIGHTNESS_SENSOR true // Disables Vcc reading functionality to use brightness sensor
 #endif
@@ -75,6 +85,9 @@
 #endif
 #ifndef USE_DOUBLE_BUFFERING
 #define USE_DOUBLE_BUFFERING true // Only disable if pressed for memory, will cause visual glitches/partial rendering
+#endif
+#ifndef USE_IMAGE_CACHE
+#define USE_IMAGE_CACHE false // Saves all widget images in memory to increase render times
 #endif
 #ifndef CACHE_DASHBOARD
 #define CACHE_DASHBOARD true // Disable for dashboard development, I guess
@@ -101,10 +114,13 @@
 #define USE_WEATHER true // Disable to save space if weather widgets aren't needed
 #endif
 #ifndef USE_TETRIS
-#define USE_TETRIS false
+#define USE_TETRIS false // Disable to save memory on ESP8266
+#endif
+#ifndef USE_TRANSPARENCY
+#define USE_TRANSPARENCY true // Disable to save memory on ESP8266
 #endif
 #ifndef VERSION_CODE
-#define VERSION_CODE 0
+#define VERSION_CODE 0 // The current firmware version
 #endif
 #ifndef BOARD_NAME
 #ifdef ESP32
@@ -119,14 +135,17 @@
 #ifndef DISPLAY_HEIGHT
 #define DISPLAY_HEIGHT 32 // The height of the display
 #endif
-#ifndef DISPLAY_PANELS
-#define DISPLAY_PANELS 1 // The number of total panels being horizontally chained
+#ifndef PXMATRIX_PANELS
+#define PXMATRIX_PANELS 1 // The number of total panels being horizontally chained
 #endif
-#ifndef DISPLAY_ROW_PATTERN
-#define DISPLAY_ROW_PATTERN 16 // The row pattern for the display
+#ifndef PXMATRIX_ROW_PATTERN
+#define PXMATRIX_ROW_PATTERN 16 // The row pattern for the display
+#endif
+#ifndef PXMATRIX_SPI_OVERRIDE
+#define PXMATRIX_SPI_OVERRIDE true // Override PXMATRIX SPI pins for ESP32
 #endif
 #ifndef DEBUGGING
-#define DEBUGGING false
+#define DEBUGGING false // Debug printing
 #endif
 #ifndef DEBUG_TRANSPARENCY
 #define DEBUG_TRANSPARENCY false // Save the transparency buffer as an read-only image
@@ -168,7 +187,7 @@ CustomSPIFFSFS DashboardFS;
 #define DashboardFS LittleFS
 #define CustomUpdate Update
 // Both SPIFFS partitions are the same size for simplicity
-FS UserFS = FS(FSImplPtr(new littlefs_impl::LittleFSImpl(FS_PHYS_ADDR + FS_PHYS_SIZE, FS_PHYS_SIZE, FS_PHYS_PAGE, FS_PHYS_BLOCK, 5)));
+FS UserFS = FS(FSImplPtr(new littlefs_impl::LittleFSImpl(FS_PHYS_ADDR - FS_PHYS_SIZE, FS_PHYS_SIZE, FS_PHYS_PAGE, FS_PHYS_BLOCK, 5)));
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #endif
@@ -177,7 +196,11 @@ FS UserFS = FS(FSImplPtr(new littlefs_impl::LittleFSImpl(FS_PHYS_ADDR + FS_PHYS_
 #include <AsyncJson.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
+#if DISPLAY_TYPE == DISPLAY_PXMATRIX
 #include <PxMatrix.h>
+#elif DISPLAY_TYPE == DISPLAY_SSD1306
+#include <Adafruit_SSD1306.h>
+#endif
 #define ESP_DRD_USE_EEPROM true
 #include <ESP_DoubleResetDetector.h>
 #include <DNSServer.h>
@@ -210,6 +233,30 @@ struct rgbColor {
     uint8_t g;
     uint8_t b;
 };
+
+rgbColor unpack565Color(uint16_t color) {
+    return {
+        (uint8_t)((color & 0xF800) >> 11), 
+        (uint8_t)((color & 0x7E0) >> 5), 
+        (uint8_t)(color & 0x1F)
+    };
+}
+
+uint16_t pack565Color(uint8_t r, uint8_t g, uint8_t b) {
+    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+}
+
+uint16_t processColor(uint16_t color) {
+    return DISPLAY_TYPE == DISPLAY_SSD1306 ? !!color : color;
+}
+
+const uint16_t RED = pack565Color(255, 0, 0);
+const uint16_t GREEN = pack565Color(0, 255, 0);
+const uint16_t BLUE = pack565Color(0, 0, 255);
+//const uint16_t WHITE = pack565Color(255, 255, 255);
+const uint16_t YELLOW = pack565Color(255, 255, 0);
+const uint16_t CYAN = pack565Color(0, 255, 255);
+const uint16_t MAGENTA = pack565Color(255, 0, 255);
 
 class DisplayBuffer : public Adafruit_GFX {
     bool _rotate;
@@ -275,7 +322,7 @@ public:
 };
 
 std::map <std::string, FSImage> builtinImages = {
-                                                {"blm", {64, 32, 36}},
+                                                {"blm", {64, 32, 10}},
                                                 {"weather", {64, 32, 1}}
                                                 };
 
@@ -304,6 +351,7 @@ bool usingTransparency;
 bool metric;
 bool fastUpdate;
 bool vertical;
+bool staticRendering; // Fully render the entire display every update to double animation speed for large images
 String weatherKey;
 String weatherLocation;
 String location;
@@ -331,6 +379,7 @@ bool needsRestart; // If a system reboot is needed
 bool needsTimezone; // If the timezone needs to be set still
 bool needsFormat; // If a FS format is needed
 bool needsFactoryReset; // If a factory reset is needed
+bool needsImageReset; // If an image file/cache clearing is needed
 uint8_t theHour12;
 uint8_t theHour;
 uint8_t theMinute;
@@ -347,6 +396,10 @@ uint8_t muxPattern;
 uint8_t muxDelay;
 AsyncClient* finalClient; // Client to wait for closing before restart
 
+#if DISPLAY_TYPE == DISPLAY_PXMATRIX
+const uint16_t BG_COLOR = BLUE;
+const uint16_t WHITE = pack565Color(255, 255, 255);
+const uint16_t TEXT_COLOR = WHITE;
 #ifdef ESP32
 #define P_LAT 22
 #define P_A 19
@@ -354,23 +407,31 @@ AsyncClient* finalClient; // Client to wait for closing before restart
 #define P_C 18
 #define P_D 5
 #define P_E 15
-#define P_OE 26 // Use 26 instead of 2 since pin isn't broken out on NodeMCU 32s
+#if PXMATRIX_SPI_OVERRIDE
+#define P_OE 26
+#else
+#define P_OE 2
+#endif
 TaskHandle_t displayUpdateTaskHandle = NULL;
 hw_timer_t * timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 #else
 #include <Ticker.h>
 Ticker display_ticker;
-#define P_LAT D0
-#define P_A D1
-#define P_B D2
-#define P_C D8
-#define P_D D6
-#define P_E D3
-#define P_OE D4
+#define P_LAT 16
+#define P_A 5
+#define P_B 4
+#define P_C 15
+#define P_D 12
+#define P_E 0
+#define P_OE 2
 #endif
 
 PxMATRIX display(DISPLAY_WIDTH, DISPLAY_HEIGHT, P_LAT, P_OE, P_A, P_B, P_C, P_D, P_E);
+
+void updateDisplay() {
+    display.showBuffer();
+}
 
 #ifdef ESP8266
 void display_updater() {
@@ -381,27 +442,29 @@ void display_updater() {
 void IRAM_ATTR display_updater(){
   portENTER_CRITICAL_ISR(&timerMux);
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-  vTaskNotifyGiveFromISR(displayUpdateTaskHandle, &xHigherPriorityTaskWoken );
+  vTaskNotifyGiveFromISR(displayUpdateTaskHandle, &xHigherPriorityTaskWoken);
   if(xHigherPriorityTaskWoken)
-    portYIELD_FROM_ISR( );
+    portYIELD_FROM_ISR();
   portEXIT_CRITICAL_ISR(&timerMux);
 }
  
 void displayUpdateTask(void *) {
   for(;;)
-    if (ulTaskNotifyTake( pdTRUE, portMAX_DELAY) && !disableDisplay)
+    if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY) && !disableDisplay)
         display.display(70);
 }
 
 #endif
+#elif DISPLAY_TYPE == DISPLAY_SSD1306
+const uint16_t BG_COLOR = BLACK;
+const uint16_t TEXT_COLOR = WHITE;
 
-const uint16_t RED = display.color565(255, 0, 0);
-const uint16_t GREEN = display.color565(0, 255, 0);
-const uint16_t BLUE = display.color565(0, 0, 255);
-const uint16_t WHITE = display.color565(255, 255, 255);
-const uint16_t YELLOW = display.color565(255, 255, 0);
-const uint16_t CYAN = display.color565(0, 255, 255);
-const uint16_t MAGENTA = display.color565(255, 0, 255);
+Adafruit_SSD1306 display(DISPLAY_WIDTH, DISPLAY_HEIGHT, &Wire, -1);
+
+void updateDisplay() {
+    display.display();
+}
+#endif
 
 #if BRIGHTNESS_ROLLING_AVG_SIZE > 0
 #include <RunningAverage.h>
@@ -422,6 +485,11 @@ DisplayBuffer displayBuffer;
 ADC_MODE(ADC_VCC);
 #endif
 
+int mod(int a, int b) {
+    int r = a % b;
+    return r < 0 ? r + b : r;
+}
+
 #pragma region Configuration
 
 void writeDefaultConfig() {
@@ -438,15 +506,9 @@ uint16_t parseHexColorString(std::string s) {
         Serial.println(s.c_str());
         return 0;
     }
-    return display.color565(strtoul(s.substr(offset, 2).c_str(), NULL, 16),
+    return pack565Color(strtoul(s.substr(offset, 2).c_str(), NULL, 16),
                             strtoul(s.substr(offset + 2, 2).c_str(), NULL, 16),
                             strtoul(s.substr(offset + 4, 2).c_str(), NULL, 16));
-}
-
-void closeFiles() {
-    DEBUG("Closing widget files\n");
-    for (uint i = 0; i < widgets.size(); i++)
-        widgets[i].file.close();
 }
 
 bool parseConfig(JsonVariant& json, String& errorString) {
@@ -467,6 +529,7 @@ bool parseConfig(JsonVariant& json, String& errorString) {
     bool tempMetric = json["metric"];
     bool tempVertical = json["vertical"];
     bool tempTransparency = false;
+    bool tempStaticRendering = json["staticRendering"];
     bool tempFastUpdate = json["fastUpdate"];
     String tempLocation = json["timezone"].isNull() ? "America/Detroit" : String(json["timezone"].as<char *>());
 
@@ -591,7 +654,8 @@ bool parseConfig(JsonVariant& json, String& errorString) {
     weatherKey = tempWeatherKey;
     metric = tempMetric;
     fastUpdate = tempFastUpdate;
-    usingTransparency = tempTransparency;
+    staticRendering = tempStaticRendering;
+    usingTransparency = tempTransparency && !staticRendering && USE_TRANSPARENCY;
     lattitude = tempLattitude;
     longitude = tempLongitude;
     muxPattern = tempMuxPattern;
@@ -601,11 +665,13 @@ bool parseConfig(JsonVariant& json, String& errorString) {
         needsTimezone = true;
     location = tempLocation;
 
+#if DISPLAY_TYPE == DISPLAY_PXMATRIX
     display.setFastUpdate(fastUpdate);
     display.setMuxPattern(static_cast<mux_patterns>(muxPattern));
     display.setScanPattern(static_cast<scan_patterns>(scanPattern));
     display.setMuxDelay(muxDelay, muxDelay, muxDelay, muxDelay, muxDelay);
     display.setRotate(vertical);
+#endif
     display.setRotation(vertical);
     displayBuffer.setRotate(vertical);
     displayBuffer.setRotation(vertical);
@@ -680,12 +746,12 @@ void closeAndRestart(AsyncWebServerRequest *request) {
 
 void onStartAccessPoint(AsyncWiFiManager *wiFiManager) {
     Serial.println(F("Entering AP config mode"));
-    display.fillScreen(BLUE);
+    display.fillScreen(BG_COLOR);
     display.setCursor(0, 0);
     display.println(F("Wifi"));
     display.println(F("Config"));
     display.println(F("Mode"));
-    display.showBuffer();
+    updateDisplay();
     needsConfig = true;
 }
 
@@ -713,18 +779,18 @@ bool sendFile(AsyncWebServerRequest *request, FS& fs, String path, bool cache = 
     return true;
 }
 
-static const char noDashboardIndex[] PROGMEM = R"(
+void serveRoot(AsyncWebServerRequest *request) {
+    static const char noDashboardIndex[] PROGMEM = R"(
   <!DOCTYPE html>
   <html>
   <body>
   <h1>DashboardFS is not installed</h1>
-  <a href="https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest" target="_blank">Get DashboardFS</a>
+  <a href="https://github.com/TheLogicMaster/ESP-Smart-Display/releases/latest" target="_blank">Get DashboardFS</a>
   <a href="/recovery">Install DashboardFS</a>
   </body>
   </html>
 )";
 
-void serveRoot(AsyncWebServerRequest *request) {
     if (!sendFile(request, DashboardFS, F("/index.html")))
         request->send(200, "text/html", noDashboardIndex);
 }
@@ -890,13 +956,14 @@ std::map <std::string, FSImage> getFSImageData() {
         dataFile = UserFS.open("/imageData.json", "r");
     }
 
-    std::unique_ptr<char[]> buf(new char[size]);
-
-    dataFile.readBytes(buf.get(), size);
-    dataFile.close();
-
     DynamicJsonDocument doc(IMAGE_JSON_BUFFER_SIZE);
-    deserializeJson(doc, buf.get());
+    DeserializationError error = deserializeJson(doc, dataFile);
+    dataFile.close();
+    if (error) {
+        Serial.printf("Failed to deserialize image data, writing default: %i\n", error.code());
+        writeDefaultImageData();
+        return {};
+    }
     for (auto const &entry : doc.as<JsonObject>())
         data[entry.key().c_str()] = {entry.value()["width"], entry.value()["height"], entry.value()["length"]};
 
@@ -916,9 +983,13 @@ void writeFSImageData(std::map <std::string, FSImage> data) {
         o["height"] = entry.second.height;
         o["length"] = entry.second.length;
     }
-    std::unique_ptr<char[]> buf(new char[MAX_IMAGE_DATA_FILE_SIZE]);
-    serializeJson(doc, buf.get(), MAX_IMAGE_DATA_FILE_SIZE);
-    dataFile.print(buf.get());
+#if DEBUGGING
+    Serial.println("ImageData:");
+    serializeJsonPretty(doc, Serial);
+    Serial.println();
+#endif
+    size_t size = serializeJson(doc, dataFile);
+    DEBUG("New Image Data Size: %i\n", size);
     dataFile.close();
 }
 
@@ -936,31 +1007,32 @@ void serveImageData(AsyncWebServerRequest *request) {
     Dir imageDir = getImageDir();
     std::map <std::string, FSImage> fsImageData = getFSImageData();
 
-    size_t size = 100 + (progmemImages.size() + fsImageData.size() + builtinImages.size()) * 100;
-    DynamicJsonDocument doc(size);
+    uint images = progmemImages.size() + fsImageData.size() + builtinImages.size() + DEBUG_TRANSPARENCY;
+    size_t size = 40 + 25 * images + JSON_OBJECT_SIZE(images) + fsImageData.size() * JSON_OBJECT_SIZE(3) + builtinImages.size() * JSON_OBJECT_SIZE(4) + (progmemImages.size() + DEBUG_TRANSPARENCY) * JSON_OBJECT_SIZE(5);
+    AsyncJsonResponse* response = new AsyncJsonResponse(false, size);
+    JsonVariant& json = response->getRoot();
 
 #if DEBUG_TRANSPARENCY
     {
-        JsonObject o = doc.createNestedObject("Transparency Buffer");
+        JsonObject o = json.createNestedObject("Transparency Buffer");
         o["width"] = DISPLAY_WIDTH;
         o["height"] = DISPLAY_HEIGHT;
         o["length"] = 1;
         o["type"] = IMAGE_UINT8;
-        o["progmem"] = false;
     }
 #endif
 
     for (auto const &entry : progmemImages) {
-        JsonObject o = doc.createNestedObject(entry.first.c_str());
+        JsonObject o = json.createNestedObject(entry.first.c_str());
         o["width"] = entry.second.width;
         o["height"] = entry.second.height;
         o["length"] = entry.second.length;
         o["type"] = entry.second.type;
         o["progmem"] = true;
-        }
+    }
     
     for (auto const &entry : builtinImages) {
-        JsonObject o = doc.createNestedObject(entry.first.c_str());
+        JsonObject o = json.createNestedObject(entry.first.c_str());
         o["width"] = entry.second.width;
         o["height"] = entry.second.height;
         o["length"] = entry.second.length;
@@ -968,20 +1040,17 @@ void serveImageData(AsyncWebServerRequest *request) {
     }
 
     for (auto const &entry : fsImageData) {
-        JsonObject o = doc.createNestedObject(entry.first.c_str());
+        JsonObject o = json.createNestedObject(entry.first.c_str());
         o["width"] = entry.second.width;
         o["height"] = entry.second.height;
         o["length"] = entry.second.length;
-        o["progmem"] = false;
     }
 
-    std::unique_ptr<char[]> buf(new char[size]);
-    serializeJson(doc, buf.get(), size);
-    request->send(200, F("text/json"), buf.get());
+    response->setLength();
+    request->send(response);
 }
 
 void serveUploadImage(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-    closeFiles();
     String imageFilename = "/images/" + request->arg("name");
 
     if (!index) {
@@ -1002,6 +1071,7 @@ void serveUploadImage(AsyncWebServerRequest *request, String filename, size_t in
                                                         (uint8_t)strtoul(request->arg(F("length")).c_str(), NULL, 10)};
             writeFSImageData(fsImageData);
             needsUpdate = true;
+            needsImageReset = true;
         } else {
             request->send(400, F("text/plain"), F("Failed to save image"));
             if (UserFS.exists(imageFilename))
@@ -1031,7 +1101,7 @@ void serveImage(AsyncWebServerRequest *request) {
 }
 
 void serveRenameImage(AsyncWebServerRequest *request) {
-    closeFiles();
+    needsImageReset = true;
     String name = request->arg(F("name"));
     String newName = request->arg(F("newName"));
     if (!UserFS.exists("/images/" + name)) {
@@ -1050,8 +1120,9 @@ void serveRenameImage(AsyncWebServerRequest *request) {
 }
 
 void serveDeleteImage(AsyncWebServerRequest *request) {
-    closeFiles();
+    needsImageReset = true;
     std::string name = request->arg(F("name")).c_str();
+    DEBUG("Deleting image: %s\n", name.c_str());
     std::map <std::string, FSImage> fsImageData = getFSImageData();
     fsImageData.erase(name);
     std::string filename = "/images/" + name;
@@ -1062,22 +1133,12 @@ void serveDeleteImage(AsyncWebServerRequest *request) {
 }
 
 void deleteAllImages() {
-    // Todo: Ensure files are all deleted
     DEBUG("Deleting all custom images\n");
-    closeFiles();
+    needsImageReset = true;
+    std::map<std::string, FSImage> images = getFSImageData();
     writeDefaultImageData();
-    Dir dir = getImageDir();
-    UserFS.rmdir(F("/images"));
-    UserFS.mkdir(F("/images"));
-#ifdef ESP8266
-    std::vector <String> files;
-    while (dir.next()) {
-        Serial.println(dir.fileName().c_str());
-        files.push_back(dir.fileName());
-    }
-    for (const auto &file: files)
-        UserFS.remove("/images/" + file);
-#endif
+    for (auto const entry : images) 
+        UserFS.remove("/images/" + String(entry.first.c_str()));
 }
 
 void serveDeleteAllImages(AsyncWebServerRequest *request) {
@@ -1086,7 +1147,6 @@ void serveDeleteAllImages(AsyncWebServerRequest *request) {
 }
 
 void serveResetConfiguration(AsyncWebServerRequest *request) {
-    closeFiles();
     writeDefaultConfig();
     closeAndRestart(request);
 }
@@ -1212,14 +1272,6 @@ void setupWebserver() {
 
 #pragma region Rendering
 
-rgbColor unpack565Color(uint16_t color) {
-    return {
-        (uint8_t)((color & 0xF800) >> 11), 
-        (uint8_t)((color & 0x7E0) >> 5), 
-        (uint8_t)(color & 0x1F)
-    };
-}
-
 bool checkAlphaColors(std::vector<uint16_t> alphaColors, uint16_t color) {
     for (uint i = 0; i < alphaColors.size(); i++) {
         if (alphaColors[i] == color)
@@ -1232,15 +1284,41 @@ bool checkAlphaColors(std::vector<uint16_t> alphaColors, uint16_t color) {
     return false;
 }
 
-void drawImage(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset,
+void drawImagePixel(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t x, uint8_t y, uint8_t width, uint8_t height, uint8_t frame, uint8_t animation, uint16_t* line_buffer) {
+    switch (animation) {
+        case IMAGE_ANIMATION_SCROLL_LEFT:
+            d.drawPixel(xOffset + mod(x - frame, width), yOffset + y, processColor(line_buffer[x]));
+            break;
+        case IMAGE_ANIMATION_SCROLL_RIGHT:
+            d.drawPixel(xOffset + (x + frame) % width, yOffset + y, processColor(line_buffer[x]));
+            break;
+        case IMAGE_ANIMATION_SCROLL_UP:
+            d.drawPixel(xOffset + x, yOffset + mod(y - frame, height), processColor(line_buffer[x]));
+            break;
+        case IMAGE_ANIMATION_SCROLL_DOWN:
+            d.drawPixel(xOffset + x, yOffset + (y + frame) % height, processColor(line_buffer[x]));
+            break;
+        case IMAGE_ANIMATION_SLIDESHOW:
+            d.drawPixel(xOffset + x, yOffset + y, processColor(line_buffer[x]));
+            break;
+        default:
+            Serial.println("Unknown image animation type");
+            break;
+        }
+}
+
+void drawImage(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset, uint8_t frame, uint8_t animation,
                     uint8_t *data, std::vector<uint16_t> alphaColors, bool transparent, bool uInt16) {
     uint16_t line_buffer[width];
     for (uint8_t y = 0; y < height; y++) {
-        memcpy_P(line_buffer, data + (offset * width * height + y * width) * 2, width * 2);
+        if (animation == IMAGE_ANIMATION_SLIDESHOW)
+            memcpy_P(line_buffer, data + ((offset + frame) * width * height + y * width) * 2, width * 2);
+        else
+            memcpy_P(line_buffer, data + (offset * width * height + y * width) * 2, width * 2);
         for (uint8_t x = 0; x < width; x++) {
             if (transparent && checkAlphaColors(alphaColors, line_buffer[x]))
                 continue;
-            d.drawPixel(xOffset + x, yOffset + y, line_buffer[x]);
+            drawImagePixel(d, xOffset, yOffset, x, y, width, height, frame, animation, line_buffer);
         }
 #if defined(ESP8266)
         if (width * height > PIXEL_YIELD_THRESHOLD)
@@ -1249,9 +1327,13 @@ void drawImage(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t width,
     }
 }
 
-void drawImageFs(Adafruit_GFX &d, FS fs, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset,
-                      const char name[], std::vector<uint16_t> alphaColors, bool transparent, File &file) {
+void drawImageFs(Adafruit_GFX &d, FS fs, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height, uint8_t offset, uint8_t frame, uint8_t animation,
+                      const char name[], std::vector<uint16_t> alphaColors, bool transparent, File &file, std::shared_ptr<uint8_t>& cache) {
+#if USE_IMAGE_CACHE
+    if (!cache) {
+#else
     if (!file) {
+#endif
         if (!fs.exists(name)) {
             Serial.print(F("Couldn't find image to draw for: "));
             Serial.println(name);
@@ -1263,17 +1345,39 @@ void drawImageFs(Adafruit_GFX &d, FS fs, uint8_t xOffset, uint8_t yOffset, uint8
             Serial.printf("Failed to open image: %s\n", name);
             return;
         }
+#if USE_IMAGE_CACHE
+        cache.reset(new uint8_t[file.size()]);
+        if (!cache) {
+            Serial.printf("Failed to cache image: %s\n", name);
+            return;
+        }
+        file.readBytes((char*)cache.get(), file.size());
+        file.close();
+#endif
     }
 
-    char line_buffer[width * 2];
-    file.seek(offset * width * height * 2);
+    uint16_t line_buffer[width];
+#if !USE_IMAGE_CACHE
+    if (animation == IMAGE_ANIMATION_SLIDESHOW)
+        file.seek((offset + frame) * width * height * 2);
+    else
+        file.seek(offset * width * height * 2);
+#endif
     for (uint8_t y = 0; y < height; y++) {
-        file.readBytes(line_buffer, width * 2);
+#if USE_IMAGE_CACHE
+        if (!cache)
+            return;
+        if (animation == IMAGE_ANIMATION_SLIDESHOW)
+            memcpy(line_buffer, cache.get() + (offset + frame) * width * height * 2 + y * width * 2, width * 2);
+        else
+            memcpy(line_buffer, cache.get() + offset * width * height * 2 + y * width * 2, width * 2);
+#else
+        file.readBytes((char*)line_buffer, width * 2);
+#endif
         for (uint8_t x = 0; x < width; x++) {
-            uint16_t color = line_buffer[x * 2] | line_buffer[x * 2 + 1] << 8;
-            if (transparent && checkAlphaColors(alphaColors, color))
+            if (transparent && checkAlphaColors(alphaColors, line_buffer[x]))
                 continue;
-            d.drawPixel(xOffset + x, yOffset + y, color);
+            drawImagePixel(d, xOffset, yOffset, x, y, width, height, frame, animation, line_buffer);
         }
 #if defined(ESP8266)
         if (width * height > PIXEL_YIELD_THRESHOLD)
@@ -1282,6 +1386,7 @@ void drawImageFs(Adafruit_GFX &d, FS fs, uint8_t xOffset, uint8_t yOffset, uint8
     }
 }
 
+// Doesn't support animations or multiple frames
 void
 drawGimpImage(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, uint8_t height, std::vector<uint16_t> alphaColors, bool transparent, char *data) {
     for (uint y = 0; y < height; y++) {
@@ -1297,7 +1402,7 @@ drawGimpImage(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, 
             uint16_t color = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
             if (transparent && checkAlphaColors(alphaColors, color))
                 continue;
-            display.drawPixel(x + xOff, y + yOff, color);
+            display.drawPixel(x + xOff, y + yOff, processColor(color));
         }
 #if defined(ESP8266)
         if (width * height > PIXEL_YIELD_THRESHOLD)
@@ -1312,14 +1417,14 @@ void drawAnalogClock(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t 
     double hourAngle = 2 * PI * (theHour12 / 12. + theMinute / 720. - .25);
     for (uint i = 0; i < 12; i++) {
         double angle = 2 * PI * i / 12.;
-        d.drawPixel(xOffset + round(cos(angle) * radius), yOffset + round(sin(angle) * radius), colorMarking);
+        d.drawPixel(xOffset + round(cos(angle) * radius), yOffset + round(sin(angle) * radius), processColor(colorMarking));
     }
     d.drawLine(xOffset, yOffset,
                xOffset + round(cos(minAngle) * radius * .9),
-               yOffset + round(sin(minAngle) * radius * .9), colorMinute);
+               yOffset + round(sin(minAngle) * radius * .9), processColor(colorMinute));
     d.drawLine(xOffset, yOffset,
                xOffset + round(cos(hourAngle) * radius * .5),
-               yOffset + round(sin(hourAngle) * radius * .5), colorHour);
+               yOffset + round(sin(hourAngle) * radius * .5), processColor(colorHour));
 }
 
 String getTimeText(uint8_t type) {
@@ -1340,14 +1445,14 @@ String getTimeText(uint8_t type) {
 void drawText(Adafruit_GFX &d, const char *text, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height,
                  uint16_t color, uint8_t wrapping, uint8_t size) {
     d.setTextSize(size);
-    d.setTextColor(color);
+    d.setTextColor(processColor(color));
     d.setCursor(xOffset, yOffset);
     d.print(text);
 }
 
 void drawTinyText(Adafruit_GFX &display, const char text[], uint8_t x, uint8_t y, uint8_t width, uint8_t height,
                   uint16_t color, bool transparent, uint16_t backgroundColor, uint8_t wrapping) {
-    TFDrawText(display, text, x, y, color, transparent, backgroundColor);
+    TFDrawText(display, text, x, y, processColor(color), transparent, processColor(backgroundColor));
 }
 
 void drawTextWidget(Adafruit_GFX &d, Widget &widget) {
@@ -1717,7 +1822,7 @@ void updateWidget(Widget &widget) {
             break;
     }
 
-    if (widget.background)
+    if (widget.dirty && (widget.background || staticRendering))
         needsUpdate = true;
     widget.lastUpdate = millis();
 }
@@ -1729,45 +1834,44 @@ void updateWidgets() {
 }
 
 void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
-    if (!usingTransparency || !widget.transparent) {
-        if (widget.type == WIDGET_ANALOG_CLOCK)
-            d.fillCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2,
-                         widget.backgroundColor);
-        else if (widget.type == WIDGET_SHAPE) {
-            switch (widget.contentType) {
-                default:
-                    Serial.printf("Unknown shape: %i\n", widget.contentType);
-                case SHAPE_PIXEL:
-                case SHAPE_RECTANGLE:
-                    d.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.backgroundColor);
-                    break;
-                case SHAPE_RECTANGLE_ROUNDED:
-                    d.fillRoundRect(widget.xOff, widget.yOff, widget.width, widget.height, ROUNDED_RECT_RADIUS, widget.backgroundColor);
-                    break;
-                case SHAPE_CIRCLE:
-                    d.fillCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2,
-                         widget.backgroundColor);
-                    break;
-            }
-        } else
-            d.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.backgroundColor);
-    } else if (!buffering)
-        displayBuffer.write(display, widget.xOff, widget.yOff, widget.width, widget.height);
-
+    if (!widget.background) {
+        if ((!usingTransparency && !staticRendering) || !widget.transparent) {
+            if (widget.type == WIDGET_ANALOG_CLOCK)
+                d.fillCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2,
+                             processColor(widget.backgroundColor));
+            else if (widget.type == WIDGET_SHAPE) {
+                switch (widget.contentType) {
+                    default:
+                        Serial.printf("Unknown shape: %i\n", widget.contentType);
+                    case SHAPE_PIXEL:
+                    case SHAPE_RECTANGLE:
+                        d.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, processColor(widget.backgroundColor));
+                        break;
+                    case SHAPE_RECTANGLE_ROUNDED:
+                        d.fillRoundRect(widget.xOff, widget.yOff, widget.width, widget.height, ROUNDED_RECT_RADIUS, processColor(widget.backgroundColor));
+                        break;
+                    case SHAPE_CIRCLE:
+                        d.fillCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2,
+                             processColor(widget.backgroundColor));
+                        break;
+                }
+            } else
+                d.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, processColor(widget.backgroundColor));
+        } else if (!buffering && !staticRendering)
+            displayBuffer.write(display, widget.xOff, widget.yOff, widget.width, widget.height);
+    }
 
     switch (widget.type) {
         case WIDGET_PROGMEM_IMAGE:
             if (builtinImages.count(widget.content) > 0)
-                drawImageFs(d, DashboardFS, widget.xOff, widget.yOff, widget.width, widget.height, widget.state + widget.offset,
-                             ("/images/" + widget.content).c_str(), widget.colors, widget.transparent, widget.file);
+                drawImageFs(d, DashboardFS, widget.xOff, widget.yOff, widget.width, widget.height, widget.offset, widget.state, widget.contentType, ("/images/" + widget.content).c_str(), widget.colors, widget.transparent, widget.file, widget.cache);
             else
                 switch (progmemImages[widget.content].type) {
                     case IMAGE_UINT8:
                     case IMAGE_UINT16:
                         drawImage(d, widget.xOff + (widget.width - progmemImages[widget.content].width) / 2,
                                         widget.yOff + (widget.height - progmemImages[widget.content].height) / 2,
-                                        progmemImages[widget.content].width, progmemImages[widget.content].height,
-                                        widget.state + widget.offset, (uint8_t *) progmemImages[widget.content].data,
+                                        progmemImages[widget.content].width, progmemImages[widget.content].height, widget.offset, widget.state, widget.contentType, (uint8_t *) progmemImages[widget.content].data,
                                         widget.colors, widget.transparent, progmemImages[widget.content].type == IMAGE_UINT16);
                         break;
                     case IMAGE_GIMP:
@@ -1782,8 +1886,8 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
                 }
             break;
         case WIDGET_FS_IMAGE:
-            drawImageFs(d, UserFS, widget.xOff, widget.yOff, widget.width, widget.height, widget.state + widget.offset,
-                             ("/images/" + widget.content).c_str(), widget.colors, widget.transparent, widget.file);
+            drawImageFs(d, UserFS, widget.xOff, widget.yOff, widget.width, widget.height, widget.offset, widget.state, widget.contentType,
+                             ("/images/" + widget.content).c_str(), widget.colors, widget.transparent, widget.file, widget.cache);
             break;
         case WIDGET_ANALOG_CLOCK:
             drawAnalogClock(d, widget.xOff + widget.height / 2, widget.yOff + widget.height / 2,
@@ -1799,20 +1903,20 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
             break;
         case WIDGET_WEATHER_ICON:
 #if USE_WEATHER
-            TIDrawIcon(d, weatherID, widget.xOff + _max(0, (widget.width - 10 + 1) / 2), widget.yOff + (widget.height - 5) / 2, widget.state, true, widget.transparent, widget.backgroundColor);
+            TIDrawIcon(d, weatherID, widget.xOff + _max(0, (widget.width - 10 + 1) / 2), widget.yOff + (widget.height - 5) / 2, widget.state, true, widget.transparent, processColor(widget.backgroundColor), DISPLAY_TYPE == DISPLAY_SSD1306);
 #endif
             break;
         case WIDGET_SHAPE:
             switch(widget.contentType) {
                 default:
                 case SHAPE_RECTANGLE:
-                    d.drawRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.colors[0]);
+                    d.drawRect(widget.xOff, widget.yOff, widget.width, widget.height, processColor(widget.colors[0]));
                     break;
                 case SHAPE_RECTANGLE_ROUNDED:
-                    d.drawRoundRect(widget.xOff, widget.yOff, widget.width, widget.height, ROUNDED_RECT_RADIUS, widget.colors[0]);
+                    d.drawRoundRect(widget.xOff, widget.yOff, widget.width, widget.height, ROUNDED_RECT_RADIUS, processColor(widget.colors[0]));
                     break;
                 case SHAPE_CIRCLE:
-                    d.drawCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2, widget.colors[0]);
+                    d.drawCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2, processColor(widget.colors[0]));
                     break;
                 case SHAPE_PIXEL:
                     break;
@@ -1827,15 +1931,15 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
     if (widget.bordered) {
         if (widget.type == WIDGET_ANALOG_CLOCK)
             d.drawCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2,
-                         widget.borderColor);
+                         processColor(widget.borderColor));
         else
-            d.drawRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.borderColor);
+            d.drawRect(widget.xOff, widget.yOff, widget.width, widget.height, processColor(widget.borderColor));
     }
 }
 
 void drawScreen(Adafruit_GFX &d, bool fullUpdate, bool buffering, bool finalize) {
     if (fullUpdate)
-        d.fillScreen(backgroundColor);
+        d.fillScreen(processColor(backgroundColor));
 
     for (uint i = 0; i < widgets.size(); i++) {
         Widget &widget = widgets[i];
@@ -1855,16 +1959,13 @@ void drawScreen(Adafruit_GFX &d, bool fullUpdate, bool buffering, bool finalize)
     }
 }
 
-void updateScreen(bool fullUpdate) {
-    needsUpdate = false;
+void updateScreen() {
     updateWidgets();
-    if (needsUpdate)
-        return;
-    if (usingTransparency && fullUpdate) {
+    if (usingTransparency && needsUpdate) {
         if (!displayBuffer.isAllocated() && !displayBuffer.allocate())
             Serial.println(F("Can't draw screen on null buffer"));
         else {
-            drawScreen(displayBuffer, fullUpdate, true, false);
+            drawScreen(displayBuffer, true, true, false);
 #if DEBUG_TRANSPARENCY
             File f = UserFS.open("/images/Transparency Buffer", "w");
             if (vertical)
@@ -1877,11 +1978,12 @@ void updateScreen(bool fullUpdate) {
 #endif
         }
     }
-    if (USE_DOUBLE_BUFFERING) {
-        drawScreen(display, fullUpdate, false, false);
-        display.showBuffer();
-    }
-    drawScreen(display, fullUpdate, false, true);
+    
+    drawScreen(display, needsUpdate, false, staticRendering || !USE_DOUBLE_BUFFERING);
+    updateDisplay();
+    if (USE_DOUBLE_BUFFERING && !staticRendering)
+        drawScreen(display, needsUpdate, false, true);
+    needsUpdate = false;
 }
 
 #pragma endregion
@@ -1895,6 +1997,7 @@ bool isTimeInRange(uint16_t startMins, uint16_t endMins, uint16_t testMins) {
 }
 
 void updateBrightness() {
+#if DISPLAY_TYPE == DISPLAY_PXMATRIX
     uint16_t avg, constrained;
     switch (brightnessMode) {
         case BRIGHTNESS_AUTO:
@@ -1928,6 +2031,7 @@ void updateBrightness() {
         display.setBrightness(currentBrightness);
         brightnessTime = millis();
     }
+#endif
 }
 
 void updateWeather() {
@@ -2048,7 +2152,6 @@ void updateRestartFlags() {
     if (needsRestart && (!finalClient || finalClient->disconnected())) {
         if (needsFormat || needsFactoryReset) {
             DEBUG("Formatting user filesystem\n");
-            closeFiles();
             UserFS.end();
             state = STATE_DISABLED;
             disableDisplay = true;
@@ -2073,21 +2176,33 @@ void setup() {
     Serial.println();
 
     drd = new DoubleResetDetector(10, 0);
-    display.begin(16);
-#ifdef ESP8266
+
+#if DISPLAY_TYPE == DISPLAY_PXMATRIX
+    display.begin(PXMATRIX_ROW_PATTERN);
+    #ifdef ESP8266
     display_ticker.attach(0.002, display_updater);
-#endif
-#ifdef ESP32
+    #endif
+    #ifdef ESP32
     xTaskCreatePinnedToCore(displayUpdateTask, "displayUpdateTask", 2048, NULL, 4, &displayUpdateTaskHandle, 1);
     timer = timerBegin(0, 80, true);
     timerAttachInterrupt(timer, &display_updater, true);
     timerAlarmWrite(timer, 2000, true);
     timerAlarmEnable(timer);;
-#endif
-    display.setPanelsWidth(DISPLAY_PANELS);
-    display.fillScreen(BLUE);
-    display.showBuffer();
-
+    #endif
+    display.setPanelsWidth(PXMATRIX_PANELS);
+#elif DISPLAY_TYPE == DISPLAY_SSD1306
+    while (true) {
+        if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+            break;
+        Serial.println("Failed to initialize display");
+        delay(1000);
+    }
+#endif    
+    display.fillScreen(BG_COLOR);
+    display.setTextColor(TEXT_COLOR);
+    display.print("Hello");
+    updateDisplay();
+    delay(3000);
 #ifdef ESP32
     if (!DashboardFS.begin(false, "dashboard", "/dash"))
 #else
@@ -2096,20 +2211,20 @@ void setup() {
         Serial.println(F("Failed to initalize dashboard"));
 
     if (!UserFS.begin()) {
-        display.fillScreen(BLUE);
+        display.fillScreen(BG_COLOR);
         display.println(F("FS ERROR"));
         Serial.println(F("Failed to open filesystem"));
-        display.showBuffer();
+        updateDisplay();
         delay(3000);
-        display.fillScreen(BLUE);
+        display.fillScreen(BG_COLOR);
         display.setCursor(0, 0);
         display.println(F("Formatting"));
         display.println(F("Display..."));
         Serial.println(F("Formatting filesystem"));
-        display.showBuffer();
+        updateDisplay();
         delay(3000);
         display.fillScreen(0);
-        display.showBuffer();
+        updateDisplay();
         UserFS.format();
         UserFS.begin();
         needsConfig = true;
@@ -2139,22 +2254,22 @@ void setup() {
         if (true) {
 #endif
             Serial.println(F("Attemping to connect to network..."));
-            display.fillScreen(BLUE);
+            display.fillScreen(BG_COLOR);
             display.setCursor(0, 0);
             display.print(F("Connecting..."));
-            display.showBuffer();
+            updateDisplay();
             wifiManager.autoConnect("LED Matrix Display", NULL, 5);
         } else {
             wifiManager.setTryConnectDuringConfigPortal(false);
             wifiManager.startConfigPortal("LED Matrix Display");
         }
     }
-    display.fillScreen(BLUE);
+    display.fillScreen(BG_COLOR);
     display.setCursor(0, 0);
     display.println(F("Reset to"));
     display.println(F("configure"));
     display.println(F("WiFi"));
-    display.showBuffer();
+    updateDisplay();
     delay(2000); // Delay for DRD activation
 
     drd->stop();
@@ -2168,20 +2283,16 @@ void setup() {
     // Webserver
     setupWebserver();
 
-    // Development FS stuff
-    //writeDefaultConfig();
-    //DashboardFS.remove("/config.json");
-
 #if USE_NTP
     timezone.setDefault();
 #endif
 
     if (needsConfig || !getConfig()) {
-        display.fillScreen(BLUE);
+        display.fillScreen(BG_COLOR);
         display.setCursor(0, 0);
         display.println(F("Configure Display at"));
         drawTinyText(display, WiFi.localIP().toString().c_str(), 0, 17, 0, 0, WHITE, true, 0, 0);
-        display.showBuffer();
+        updateDisplay();
         needsConfig = true;
         while (needsConfig) {
             updateRestartFlags();
@@ -2193,14 +2304,24 @@ void setup() {
     }
 
     display.setTextWrap(false);
-    display.fillScreen(BLUE);
+    display.fillScreen(BG_COLOR);
     display.setCursor(0, 0);
     display.println(F("Loading"));
-    display.showBuffer();
+    updateDisplay();
 }
 
 void loop() {
     updateRestartFlags();
+
+    if (needsImageReset) {
+        for (uint i = 0; i < widgets.size(); i++) {
+            widgets[i].file.close();
+#if USE_IMAGE_CACHE
+            widgets[i].cache.reset();
+#endif
+        }
+        needsImageReset = false;
+    }
 
     switch (state) {
         default:
@@ -2212,7 +2333,7 @@ void loop() {
             updateWeather();
             updateSunMoon();
             updateBrightness();
-            updateScreen(needsUpdate);
+            updateScreen();
             updateArduinoOTA();
             break;
     }

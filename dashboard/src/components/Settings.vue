@@ -25,6 +25,10 @@
           <md-switch v-model="config.fastUpdate">Fast Update Display</md-switch>
           <md-tooltip md-delay="1000" md-direction="bottom"> PxMatrix Fast Update mode </md-tooltip>
         </div>
+        <div>
+          <md-switch v-model="config.staticRendering">Static Rendering</md-switch>
+          <md-tooltip md-delay="1000" md-direction="bottom"> Render the entire screen after every widget update </md-tooltip>
+        </div>
         <md-field>
           <label>WeatherMap API Key</label>
           <md-input v-model="config.weatherKey"></md-input>

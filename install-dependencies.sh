@@ -2,7 +2,7 @@
 
 # Install dependencies
 
-cd ./led-matrix-dashboard
+cd ./dashboard
 
 echo Installing dependencies...
 npm install

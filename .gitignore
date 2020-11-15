@@ -3,11 +3,11 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-/led-matrix-display/data
-/led-matrix-dashboard/demo
+/display/data
+/dashboard/demo
 .DS_Store
-/led-matrix-dashboard/node_modules
-/led-matrix-dashboard/dist
+/dashboard/node_modules
+/dashboard/dist
 
 
 # local env files

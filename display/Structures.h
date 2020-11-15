@@ -34,6 +34,7 @@ struct Widget {
     bool finished; // Whether a tetris animation is completed, for instance
     bool dirty; // Whether a refresh is queued
     File file; // Open file for images to prevent file operation display flashing
+    std::shared_ptr<uint8_t> cache;
 #if USE_TETRIS
     std::shared_ptr<TetrisMatrixDraw> tetris;
 #endif

@@ -1,10 +1,11 @@
-# ESP LED Matrix Display
-![GitHub](https://img.shields.io/github/license/TheLogicMaster/ESP-LED-Matrix-Display)
+# ESP Smart Display
+![GitHub](https://img.shields.io/github/license/TheLogicMaster/ESP-Smart-Display)
 ## About
-This project is intended to provide an graphically customizeable and functional firmware to drive LED Matrix panels using 
-ESP8266 based microcontrollers. It's powered by the [PxMatrix](https://github.com/2dom/PxMatrix) driver and is
-inspired by the concept of [MorphingClockRemix](https://github.com/lmirel/MorphingClockRemix) and intends to greatly
-expand upon it, providing an easily customizable system using a JSON based configuration system and a Vue based web
+This project is intended to provide an graphically customizeable and functional firmware to drive PX LED Matrix panels and
+other common displays using ESP8266 based microcontrollers. It's powered by the [PxMatrix](https://github.com/2dom/PxMatrix)
+and Adafruit display drivers. The project gained inspiration from [MorphingClockRemix](https://github.com/lmirel/
+MorphingClockRemix) and is intended to greatly expand upon it's functionality, providing an easily end-user customizable 
+system using a JSON based configuration system and a Vue based web
 interface. This is one of my first substantial C++/HTML projcts, so some aspects are still a bit rough. The name itself
 is a placeholder until something clever comes along.
 
@@ -21,20 +22,32 @@ is a placeholder until something clever comes along.
 * Tetris Animation font
 
 ## Demo
-![GitHub Workflow Status](https://img.shields.io/github/workflow/status/TheLogicMaster/ESP-LED-Matrix-Display/Build%20Demo)
+![GitHub Workflow Status](https://img.shields.io/github/workflow/status/TheLogicMaster/ESP-Smart-Display/Build%20Demo)
 
-A demo of the web dashboard is available [Here](https://thelogicmaster.github.io/ESP-LED-Matrix-Display/). Example data 
+A demo of the web dashboard is available [Here](https://thelogicmaster.github.io/ESP-Smart-Display/). Example data 
 is provided in place of the normal display API calls. Aside from configuration and image saving, the dashboard should
 be fully functional.
 
 ## Hardware
 ESP32 and ESP8266 are now fully supported. 4MB of RAM is required to use both the web dashboard
-and OTA updates. This was developed primarily on a P3 32x64 panel, but other sizes should be supported. Wiring is required to
-be like [this](https://github.com/2dom/PxMatrix#set-up-and-cabling). A photoresistor/resistor is supported on pin 
-A0 in [this](https://www.instructables.com/id/NodeMCU-With-LDR/) configuration to control the display brightness. There 
-are pre-configured Platformio environments for Wemos D1 Mini, NodeMCU V2, NodeMCU 32S, and the Wemos D1 Mini Lite. Pre-built update
-binaries are availible for D1 Mini, NodeMCU 32S, and NodeMCU V2. The D1 Mini Lite has 1MB of flash memory, so OTA updates are not 
-supported and features like HTTPS and built-in images are disabled.
+and OTA updates. 
+
+### PX LED Matrix Panels
+Any panel configuration supported by [PxMatrix](https://github.com/2dom/PxMatrix) should be supported, but pre-built
+binaries are only availible for a few display sizes such as 32x64. Most of development was on P3 and P4 32x64 panels,
+so that size is best supported. Wire the display based on [this](https://github.com/2dom/PxMatrix#set-up-and-cabling).
+The PxMatrix alternate SPI mode is used by default for ESP32 to account for displays that don't have the normal SPI
+pins broken out.
+
+### SSD1306 OLED Displays
+Any SSD1306 displays compatible with the [Adafruit SSD1306](https://github.com/adafruit/Adafruit_SSD1306) driver should
+be fully compatible, though pre-built binaries are again only availible for certain display resolutions, such as 128x64.
+For compatibility reasons, images aren't stored in a monochrome format. In SSD1306 display mode, colors are treated as
+black or not black when rendering, but still use 16bit colors.
+
+### Brightness Sensor
+A photoresistor/resistor is supported on pin A0 in [this](https://www.instructables.com/id/NodeMCU-With-LDR/) 
+configuration to control the display brightness. The sensor value can be viewed in the *Dashboard* page of the web dashboard.
 
 ## Installation
 The full release binaries can be flashed using [esptool](https://github.com/espressif/esptool) or a 
@@ -47,13 +60,13 @@ esptool --port /dev/ttyUSB0 write_flash -fm dio 0x00000 nodemcuv2-32x64-v1.bin
 esptool --port /dev/ttyUSB0 write_flash -fm dio 0x10000 nodemcu-32s-32x64-v1.bin
 ```
 Alternatively, you can use Platformio or Arduino
-IDE after downloading the latest [release](https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest) 
+IDE after downloading the latest [release](https://github.com/TheLogicMaster/ESP-Smart-Display/releases/latest) 
 source code.
-The flash memory split for the program and filesystem is 1 to 1 to 2 for a 4MB board, where 1MB is for the program, 1MB is for
-firmware OTA updates, and 2MB is for the LittleFS filesystem. For ESP8266 with platformio, this means the `eagle.flash.4m2m.ld` ld
-script. For Arduino IDE, use the `4MB (FS: 2MB)` flashing option. For 1MB boards, Platformio is probably required, as it
-doesn't look like Arduino IDE has an option to not use flash for OTA. For ESP32, a custom partition file is needed if your
-board's default flash layout doesn't suit your needs. 
+The flash memory split for the program and filesystem is 1 to 1 to 2 for a 4MB board, where 1MB is for the program, 1MB is 
+for firmware OTA updates, and 2MB is for the LittleFS filesystem. For ESP8266 with platformio, this means the 
+`eagle.flash.4m2m.ld` ld
+script. For Arduino IDE, use the `4MB (FS: 2MB)` flashing option. For ESP32, a custom partition file is needed if the 
+default flash layout doesn't suit your needs. 
 
 ### Building the Web Dashboard
 Manually compiling the firmware and building the dashboard is only required if not flashing one of the pre-built full 
@@ -70,37 +83,47 @@ must be done before uploading the filesystem image to the ESP8266.
 
 ### Arduino IDE
 To use Arduino IDE, the following libraries must be installed through the library manager:
-* PxMatrix
+* PxMatrix (If using a PX panel)
+* Adafruit SSD1306 (If using an SSD1306 OLED display)
 * Adafruit GFX Library
 * ESP_DoubleResetDetector
 * [ESPAsyncWiFiManager](https://github.com/alanswx/ESPAsyncWiFiManager) (Manually install)
 * [ESPAsyncTCP](https://github.com/me-no-dev/ESPAsyncTCP) (If using ESP8266, manually install)
-* [AsyncTCP](https://github.com/me-no-dev/AsyncTCP) (If using ESP8266, manually install)
+* [AsyncTCP](https://github.com/me-no-dev/AsyncTCP) (If using ESP32, manually install)
+* [ESPAsyncTCP](https://github.com/me-no-dev/ESPAsyncTCP) (If using ESP8266, manually install)
 * [ESPAsyncWebServer](https://github.com/me-no-dev/ESPAsyncWebServer) (Manually install)
 * ArduinoJson
 * ezTime
 * RunningAverage (If using brightness sensor "rolling" average)
 * TetrisAnimation (If using Tetris font)
 
+Due to Platformio compilation issues when using .INO files directly, the *main.cpp* must be renamed to *display.ino*
+before opening the project in Arduino IDE. All board specific definitions in *platformio.ini* must be changed in the new 
+.INO file if your board isn't a 4MB ESP8266 board.
+
 The ESP8266 board support must be installed from 
 [here](https://github.com/esp8266/Arduino#installing-with-boards-manager).
 The [ESP8266 FS plugin](https://github.com/earlephilhower/arduino-esp8266littlefs-plugin)
 is also needed to upload the web interface. Select the correct board and flash split for your board. First upload the
-code to the board, then select *FS Data Upload* under *Tools*. 
+code to the board, then select *FS Data Upload* under *Tools*. The 4MB (1MB FS) flash option must be selected.
 
 If using ESP32, add boards using [this](https://github.com/espressif/arduino-esp32/blob/master/docs/arduino-ide/boards_manager.md)
-and use the FS plugin from [here](https://github.com/me-no-dev/arduino-esp32fs-plugin). 
-
-Due to Platformio compilation issue when using .INO files directly, the *main.cpp* must be renamed to *led-matrix-display.ino*
-before opening the project in Arduino IDE. All board specific definitions in *platformio.ini* must be changed in the new .INO file
-if your board isn't a NodeMCU V2.
+and use the FS plugin from [here](https://github.com/me-no-dev/arduino-esp32fs-plugin). A custom partition layout is
+used for the project, so the included *partitions.csv* file needs to be copied to 
+*~/.arduino15/packages/esp32/hardware/esp32/1.0.4/tools/partitions/* for Linux, for example. The *boards.txt* file at
+*~/.arduino15/packages/esp32/hardware/esp32/1.0.4/boards.txt* needs to have the following added:
+```text
+esp32.menu.PartitionScheme.display=Display Layout
+esp32.menu.PartitionScheme.display.build.partitions=partitions
+```
+The *ESP32 Dev Module* board must be used to select the *Display Layout* partition scheme. Then, run *ESP32 Sketch Data Upload*
+under *Tools*.
 
 ### Platformio
 To use [Platformio](https://docs.platformio.org/), install it and configure platformio.ini to suit the display size and
 ESP flash layout. If you are using one of the boards with a pre-configured environment, just use that one, especially
 since that will enable easy OTA updates using release binaries rather than manually compiling and flashing new ones. 
-Build and upload to the board. There seems to be an issue using .ino files with platformio which necessitates running 
-the upload task twice. Then run the *Upload Filesystem Image* task.
+Build and upload to the board. Then run the *Upload Filesystem Image* task.
 
 ### Initial Setup
 This project uses [ESPAsyncWiFiManager](https://github.com/alanswx/ESPAsyncWiFiManager) to handle WiFi configuration. After successfully
@@ -140,7 +163,7 @@ be restored.
 ## Filesystem Corruption Recovery
 If the dashboard website finishes loading but has a blank screen or the display unexpectedly needs configuration, the
 flash filesystem could have been corrupted. To re-install the dashboard, visit *http://{display-address}/recovery* to
-upload a filesystem binary from the [Releases Page](https://github.com/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest).
+upload a filesystem binary from the [Releases Page](https://github.com/TheLogicMaster/ESP-Smart-Display/releases/latest).
 Flashing the display in this manner will erase all custom images and configuration settings, just like a normal OTA update.
 The display will not turn off when flashing from the recovery page, so you may want to cover the display to prevent strobing.
 Custom images can manually be recovered if only the dashboard was corrupted. Visit *http://{display-address}/images*
@@ -179,7 +202,8 @@ non-tetris fonts.
 ### Image Widgets
 There are two types of images to display: custom images provided by the user and build-in images. The built-in images
 are read-only at runtime, but more can be easily added by customizing the source code. The dimensions of image widgets
-are fixed to the size of the image content. 
+are fixed to the size of the image content. A few animations are availible that scroll the image across the screen in
+each direction.
 
 ### Weather Icon Widgets
 These components show a simple animation based on the current weather state from OpenWeatherMaps. The API key and
@@ -202,7 +226,7 @@ Availible shapes:
 This project is intended to handle everything in a more asynchronous way to ensure consistent rendering. Previously, I
 attempted to branch MorphingClockRemix with a few more features, but it was fundamentally designed differently, where
 animations would steal the main thread until they were done, which isn't really compatible with my idea for a widget
-based rendering system. Thus, I started from an empty project setup for PxMatrix.
+based rendering system. Thus, I started from scratch.
 
 ### Rendering
 Depending on your configuration, up to three display buffers could be used. One or two buffers will be used by PxMatrix
@@ -241,7 +265,7 @@ is enabled by default.
 * **Arduino OTA:** This is really only useful for LAN based development, since it doesn't want to flash the FS binary 
 directly over the existing filesystem, presumably, since it complains of not having enough space.
 * **Web Server Caching:** Files are cached based on dashboard version, so if you are modifying and testing the dashboard,
-you may want to disable this. This is disabled by default.
+you may want to disable this.
 * **Double Buffering:** The PxMatrix library supports using two buffers, with one being the actively rendered buffer
 and the other being the one being drawn to. This prevents partial renderings of content until the entire screen is done
 drawing. The downside is that twice as much memory is used for display buffers. This is enabled by default.
@@ -252,7 +276,7 @@ entire library isn't really an option. The library also leaks the drawn characte
 ideal, either. It's a very cool looking animation, though.
 
 ### Firmware Embedded Images
-Addition images can easily be added to the firmware by including the source header for either images stored as a 
+Additional images can easily be added to the firmware by including the source header for either images stored as a 
 uint8_t, uint16_t, or char(Gimp) array. To make the display aware of the images, simply add a new entry to the *progmemImages*
 map with the correct type, dimensions, and a name. 565 color and Gimp header files are supported. Both of which can be
 exported from the dashboard. The 565 format uses half the space that the Gimp format uses, so it is preferable. Unwanted

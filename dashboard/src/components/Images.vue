@@ -125,13 +125,10 @@ export default {
   name: "Images",
   components: {ImagePreview},
   async mounted() {
-    await this.waitForPromiseSuccess(this.getStats)
     this.width = this.displayWidth = this.$store.state.stats.width
     this.height = this.displayHeight = this.$store.state.stats.height
-    let full = Object.keys(this.$store.state.images).length === 0
-    if (!full)
-      await this.waitForPromiseSuccess(this.getImageData)
-    await this.refreshImages(full)
+    await this.waitForPromiseSuccess(this.getImageData)
+    await this.refreshImages()
   },
   data: () => ({
     deleteConfirm: false,
@@ -211,7 +208,7 @@ export default {
       } else {
         let buffer = new Uint16Array(this.width * this.height * this.frames)
         let image = await this.$jimp.create(await this.importFile.arrayBuffer())
-        await image.resize(this.width, this.height)
+        await image.resize(this.width, this.height, this.$jimp.RESIZE_NEAREST_NEIGHBOR)
         for (let y = 0; y < this.height; y++)
           for (let x = 0; x < this.width; x++)
             buffer[this.width * y + x] = this.pack565Color(this.$jimp.intToRGBA(await image.getPixelColor(x, y)))

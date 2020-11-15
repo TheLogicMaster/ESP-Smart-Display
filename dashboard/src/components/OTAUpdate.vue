@@ -96,10 +96,10 @@ export default {
             if (this.$store.state.latestVersion === this.$dashboardVersion && !(await this.confirm('Update Dashboard', 'It looks like your dashboard is up to date, update anyway?')))
               return
           }
-          let assets = (await this.$axios.get(`https://api.github.com/repos/TheLogicMaster/ESP-LED-Matrix-Display/releases/latest`)).data.assets
+          let assets = (await this.$axios.get(`https://api.github.com/repos/TheLogicMaster/ESP-Smart-Display/releases/latest`)).data.assets
           let url = ''
           for (let i in assets) {
-            if (this.selected === 'firmware' && assets[i].name === `firmware-${this.$store.state.stats.platform}-${this.$store.state.stats.height}x${this.$store.state.stats.width}-v${this.$store.state.latestVersion}.bin` || this.selected !== 'firmware' && assets[i].name === `fs-${this.$store.state.stats.features & 1 ? 'esp32' : 'esp8266'}-v${this.$store.state.latestVersion}.bin`)
+            if (this.selected === 'firmware' && assets[i].name === `firmware-${this.$store.state.stats.platform}-v${this.$store.state.latestVersion}.bin` || this.selected !== 'firmware' && assets[i].name === `fs-${this.$store.state.stats.features & 1 ? 'esp32' : 'esp8266'}-v${this.$store.state.latestVersion}.bin`)
               url = assets[i].url
           }
           if (url === '') {

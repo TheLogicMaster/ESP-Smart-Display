@@ -204,7 +204,7 @@ uint16_t *thun_ani[] = {thndr_ico, rain1_ico, rain2_ico, rain3_ico, rain4_ico};
 uint16_t *snow_ani[] = {snow_ico, snow1_ico, snow2_ico, snow3_ico, snow4_ico};
 uint16_t *mony_ani[] = {moony_ico, moony1_ico, moony2_ico, moony1_ico, moony2_ico};
 
-void TIDrawIcon(Adafruit_GFX& d, uint16_t id, uint8_t x, uint8_t y, uint8_t frame, bool daytime, bool transparent, uint16_t backgroundColor) {
+void TIDrawIcon(Adafruit_GFX& d, uint16_t id, uint8_t x, uint8_t y, uint8_t frame, bool daytime, bool transparent, uint16_t backgroundColor, bool monochrome) {
   uint16_t** animation;
   if (id >= 200 && id < 300) {
     animation = thun_ani;
@@ -238,7 +238,7 @@ void TIDrawIcon(Adafruit_GFX& d, uint16_t id, uint8_t x, uint8_t y, uint8_t fram
     for (j = 0; j < 10; j++)  {
       uint16_t color = animation[frame][i * 10 + j];
       if (color != 0) {
-        d.drawPixel(x + j, y + i, color);
+        d.drawPixel(x + j, y + i, monochrome ? !!color : color);
       } else if(!transparent) {
         d.drawPixel(x + j, y + i, backgroundColor);
       }        

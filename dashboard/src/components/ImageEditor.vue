@@ -176,6 +176,8 @@
 </template>
 
 <script>
+import {store} from "@/main";
+
 export default {
   name: "ImageEditor",
   data: () => ({
@@ -256,7 +258,7 @@ export default {
           }
       } else {
         let image = await this.$jimp.create(await this.uploadFile.arrayBuffer())
-        await image.resize(this.uploadWidth, this.uploadHeight)
+        await image.resize(this.uploadWidth, this.uploadHeight, this.$jimp.RESIZE_NEAREST_NEIGHBOR)
         for (let y = 0; y < this.uploadHeight; y++)
           for (let x = 0; x < this.uploadWidth; x++) {
             if (x + this.uploadX >= this.$store.state.stats.width || y + this.uploadY >= this.$store.state.stats.height)
@@ -453,7 +455,7 @@ export default {
       let data = this.cloneObject(this.$store.state.imageData[this.$route.params.name])
       data.length = this.frames
       if (await this.saveImageBuffer(name, data, buffer))
-        await this.getImage(this.$route.params.name)
+        store.commit('setImage', [name, this.pixels])
     },
     clear() {
       this.history = []

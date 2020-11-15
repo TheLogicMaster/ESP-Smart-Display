@@ -147,8 +147,7 @@ export default {
               content: 'blm',
               background: true,
               frequency: 5000,
-              length: 2,
-              type: 1
+              length: 2
             }
           ]
           break
@@ -267,8 +266,7 @@ export default {
               "height": 32,
               "content": "weather",
               "background": true,
-              "length": 1,
-              "type": 1
+              "length": 1
             },
             {
               "id": 1,

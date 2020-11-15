@@ -3,7 +3,7 @@
 # Build dashboard in demo mode
 
 export VUE_APP_DEMO_MODE=true
-cd ./led-matrix-dashboard
+cd ./dashboard
 
 echo Building demo dashboard...
 npm run build

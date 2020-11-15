@@ -80,7 +80,7 @@ Vue.use(Router)
 Vue.prototype.$download = download
 Vue.prototype.$jimp = Jimp
 Vue.prototype.$interact = interact
-Vue.prototype.$dashboardVersion = Number(process.env.VUE_APP_DASHBOARD_VERSION)
+Vue.prototype.$dashboardVersion = 0
 Vue.prototype.$demoMode = Boolean(process.env.VUE_APP_DEMO_MODE)
 Vue.prototype.$widgetNames = [
   'Built-in Image',
@@ -322,7 +322,9 @@ Vue.mixin({
     },
     async getImageData() {
       try {
-        const response = await axios.get('/images')
+        const response = await axios.get('/images', {responseType: 'json'})
+        if (!response.data)
+          return false
         store.commit('set', ['imageData', response.data])
         return true
       } catch (error) {
@@ -540,6 +542,7 @@ Vue.mixin({
         font: 0,
         frequency: 0,
         background: false,
+        transparent: false,
         disabled: false,
         bordered: false,
         borderColor: '0x000000',
@@ -696,6 +699,7 @@ Vue.mixin({
       config.fastUpdate = config.fastUpdate || false
       config.latitude = config.latitude || 42.395060
       config.longitude = config.longitude || -83.369500
+      config.staticRendering = config.staticRendering || false
       config.widgets = config.widgets || []
       for (let i in config.widgets)
         config.widgets[i] = this.bloatWidget(config.widgets[i])
@@ -760,6 +764,7 @@ Vue.prototype.$axios = axios
 let address = window.location.protocol + '//' + window.location.hostname + window.location.pathname + (window.location.port === '' ? '' : ':' + window.location.port)
 if (address.includes(':8080'))
   address = 'http://10.0.0.84:80'
+  //address = 'http://10.0.0.139:80'
 axios.defaults.baseURL = address
 
 Vue.filter('capitalize', function (value) {
