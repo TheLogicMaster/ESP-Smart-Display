@@ -246,10 +246,6 @@ uint16_t pack565Color(uint8_t r, uint8_t g, uint8_t b) {
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
-uint16_t processColor(uint16_t color) {
-    return DISPLAY_TYPE == DISPLAY_SSD1306 ? !!color : color;
-}
-
 const uint16_t RED = pack565Color(255, 0, 0);
 const uint16_t GREEN = pack565Color(0, 255, 0);
 const uint16_t BLUE = pack565Color(0, 0, 255);
@@ -318,6 +314,18 @@ public:
     void close() {
         DEBUG("Freeing display buffer...\n");
         buffer.reset();
+    }
+};
+
+class DisplayProxy : public Adafruit_GFX {
+    Adafruit_GFX* d;
+    
+public:
+    DisplayProxy(Adafruit_GFX* d) : Adafruit_GFX(DISPLAY_WIDTH, DISPLAY_HEIGHT), d(d) {
+    }
+
+    void drawPixel(int16_t x, int16_t y, uint16_t color) {
+        d->drawPixel(x, y, DISPLAY_TYPE == DISPLAY_SSD1306 ? !!color : color);
     }
 };
 
@@ -480,6 +488,8 @@ Timezone timezone;
 #endif
 
 DisplayBuffer displayBuffer;
+DisplayProxy displayBufferProxy(&displayBuffer);
+DisplayProxy displayProxy(&display);
 
 #if !USE_BRIGHTNESS_SENSOR
 ADC_MODE(ADC_VCC);
@@ -1287,19 +1297,19 @@ bool checkAlphaColors(std::vector<uint16_t> alphaColors, uint16_t color) {
 void drawImagePixel(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t x, uint8_t y, uint8_t width, uint8_t height, uint8_t frame, uint8_t animation, uint16_t* line_buffer) {
     switch (animation) {
         case IMAGE_ANIMATION_SCROLL_LEFT:
-            d.drawPixel(xOffset + mod(x - frame, width), yOffset + y, processColor(line_buffer[x]));
+            d.drawPixel(xOffset + mod(x - frame, width), yOffset + y, line_buffer[x]);
             break;
         case IMAGE_ANIMATION_SCROLL_RIGHT:
-            d.drawPixel(xOffset + (x + frame) % width, yOffset + y, processColor(line_buffer[x]));
+            d.drawPixel(xOffset + (x + frame) % width, yOffset + y, line_buffer[x]);
             break;
         case IMAGE_ANIMATION_SCROLL_UP:
-            d.drawPixel(xOffset + x, yOffset + mod(y - frame, height), processColor(line_buffer[x]));
+            d.drawPixel(xOffset + x, yOffset + mod(y - frame, height), line_buffer[x]);
             break;
         case IMAGE_ANIMATION_SCROLL_DOWN:
-            d.drawPixel(xOffset + x, yOffset + (y + frame) % height, processColor(line_buffer[x]));
+            d.drawPixel(xOffset + x, yOffset + (y + frame) % height, line_buffer[x]);
             break;
         case IMAGE_ANIMATION_SLIDESHOW:
-            d.drawPixel(xOffset + x, yOffset + y, processColor(line_buffer[x]));
+            d.drawPixel(xOffset + x, yOffset + y, line_buffer[x]);
             break;
         default:
             Serial.println("Unknown image animation type");
@@ -1402,7 +1412,7 @@ drawGimpImage(Adafruit_GFX &display, uint8_t xOff, uint8_t yOff, uint8_t width, 
             uint16_t color = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
             if (transparent && checkAlphaColors(alphaColors, color))
                 continue;
-            display.drawPixel(x + xOff, y + yOff, processColor(color));
+            display.drawPixel(x + xOff, y + yOff, color);
         }
 #if defined(ESP8266)
         if (width * height > PIXEL_YIELD_THRESHOLD)
@@ -1417,14 +1427,14 @@ void drawAnalogClock(Adafruit_GFX &d, uint8_t xOffset, uint8_t yOffset, uint8_t 
     double hourAngle = 2 * PI * (theHour12 / 12. + theMinute / 720. - .25);
     for (uint i = 0; i < 12; i++) {
         double angle = 2 * PI * i / 12.;
-        d.drawPixel(xOffset + round(cos(angle) * radius), yOffset + round(sin(angle) * radius), processColor(colorMarking));
+        d.drawPixel(xOffset + round(cos(angle) * radius), yOffset + round(sin(angle) * radius), colorMarking);
     }
     d.drawLine(xOffset, yOffset,
                xOffset + round(cos(minAngle) * radius * .9),
-               yOffset + round(sin(minAngle) * radius * .9), processColor(colorMinute));
+               yOffset + round(sin(minAngle) * radius * .9), colorMinute);
     d.drawLine(xOffset, yOffset,
                xOffset + round(cos(hourAngle) * radius * .5),
-               yOffset + round(sin(hourAngle) * radius * .5), processColor(colorHour));
+               yOffset + round(sin(hourAngle) * radius * .5), colorHour);
 }
 
 String getTimeText(uint8_t type) {
@@ -1445,14 +1455,14 @@ String getTimeText(uint8_t type) {
 void drawText(Adafruit_GFX &d, const char *text, uint8_t xOffset, uint8_t yOffset, uint8_t width, uint8_t height,
                  uint16_t color, uint8_t wrapping, uint8_t size) {
     d.setTextSize(size);
-    d.setTextColor(processColor(color));
+    d.setTextColor(color);
     d.setCursor(xOffset, yOffset);
     d.print(text);
 }
 
 void drawTinyText(Adafruit_GFX &display, const char text[], uint8_t x, uint8_t y, uint8_t width, uint8_t height,
                   uint16_t color, bool transparent, uint16_t backgroundColor, uint8_t wrapping) {
-    TFDrawText(display, text, x, y, processColor(color), transparent, processColor(backgroundColor));
+    TFDrawText(display, text, x, y, color, transparent, backgroundColor);
 }
 
 void drawTextWidget(Adafruit_GFX &d, Widget &widget) {
@@ -1619,7 +1629,7 @@ const char *jsonVariantToString(JsonVariant &variant) {
 void ensureTetrisAllocated(Widget &widget) {
 #if USE_TETRIS
     if (!widget.tetris) {
-        widget.tetris.reset(new TetrisMatrixDraw(display));
+        widget.tetris.reset(new TetrisMatrixDraw(displayProxy));
         DEBUG("Allocating Tetris object\n");
     }
     if (!widget.tetris)
@@ -1838,25 +1848,25 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
         if ((!usingTransparency && !staticRendering) || !widget.transparent) {
             if (widget.type == WIDGET_ANALOG_CLOCK)
                 d.fillCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2,
-                             processColor(widget.backgroundColor));
+                             widget.backgroundColor);
             else if (widget.type == WIDGET_SHAPE) {
                 switch (widget.contentType) {
                     default:
                         Serial.printf("Unknown shape: %i\n", widget.contentType);
                     case SHAPE_PIXEL:
                     case SHAPE_RECTANGLE:
-                        d.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, processColor(widget.backgroundColor));
+                        d.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.backgroundColor);
                         break;
                     case SHAPE_RECTANGLE_ROUNDED:
-                        d.fillRoundRect(widget.xOff, widget.yOff, widget.width, widget.height, ROUNDED_RECT_RADIUS, processColor(widget.backgroundColor));
+                        d.fillRoundRect(widget.xOff, widget.yOff, widget.width, widget.height, ROUNDED_RECT_RADIUS, widget.backgroundColor);
                         break;
                     case SHAPE_CIRCLE:
                         d.fillCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2,
-                             processColor(widget.backgroundColor));
+                             widget.backgroundColor);
                         break;
                 }
             } else
-                d.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, processColor(widget.backgroundColor));
+                d.fillRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.backgroundColor);
         } else if (!buffering && !staticRendering)
             displayBuffer.write(display, widget.xOff, widget.yOff, widget.width, widget.height);
     }
@@ -1903,20 +1913,20 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
             break;
         case WIDGET_WEATHER_ICON:
 #if USE_WEATHER
-            TIDrawIcon(d, weatherID, widget.xOff + _max(0, (widget.width - 10 + 1) / 2), widget.yOff + (widget.height - 5) / 2, widget.state, true, widget.transparent, processColor(widget.backgroundColor), DISPLAY_TYPE == DISPLAY_SSD1306);
+            TIDrawIcon(d, weatherID, widget.xOff + _max(0, (widget.width - 10 + 1) / 2), widget.yOff + (widget.height - 5) / 2, widget.state, true, widget.transparent, widget.backgroundColor);
 #endif
             break;
         case WIDGET_SHAPE:
             switch(widget.contentType) {
                 default:
                 case SHAPE_RECTANGLE:
-                    d.drawRect(widget.xOff, widget.yOff, widget.width, widget.height, processColor(widget.colors[0]));
+                    d.drawRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.colors[0]);
                     break;
                 case SHAPE_RECTANGLE_ROUNDED:
-                    d.drawRoundRect(widget.xOff, widget.yOff, widget.width, widget.height, ROUNDED_RECT_RADIUS, processColor(widget.colors[0]));
+                    d.drawRoundRect(widget.xOff, widget.yOff, widget.width, widget.height, ROUNDED_RECT_RADIUS, widget.colors[0]);
                     break;
                 case SHAPE_CIRCLE:
-                    d.drawCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2, processColor(widget.colors[0]));
+                    d.drawCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2, widget.colors[0]);
                     break;
                 case SHAPE_PIXEL:
                     break;
@@ -1931,15 +1941,15 @@ void drawWidget(Adafruit_GFX &d, Widget &widget, bool buffering) {
     if (widget.bordered) {
         if (widget.type == WIDGET_ANALOG_CLOCK)
             d.drawCircle(widget.xOff + widget.height / 2, widget.yOff + widget.height / 2, widget.height / 2,
-                         processColor(widget.borderColor));
+                         widget.borderColor);
         else
-            d.drawRect(widget.xOff, widget.yOff, widget.width, widget.height, processColor(widget.borderColor));
+            d.drawRect(widget.xOff, widget.yOff, widget.width, widget.height, widget.borderColor);
     }
 }
 
 void drawScreen(Adafruit_GFX &d, bool fullUpdate, bool buffering, bool finalize) {
     if (fullUpdate)
-        d.fillScreen(processColor(backgroundColor));
+        d.fillScreen(backgroundColor);
 
     for (uint i = 0; i < widgets.size(); i++) {
         Widget &widget = widgets[i];
@@ -1965,7 +1975,7 @@ void updateScreen() {
         if (!displayBuffer.isAllocated() && !displayBuffer.allocate())
             Serial.println(F("Can't draw screen on null buffer"));
         else {
-            drawScreen(displayBuffer, true, true, false);
+            drawScreen(displayBufferProxy, true, true, false);
 #if DEBUG_TRANSPARENCY
             File f = UserFS.open("/images/Transparency Buffer", "w");
             if (vertical)
@@ -1979,10 +1989,10 @@ void updateScreen() {
         }
     }
     
-    drawScreen(display, needsUpdate, false, staticRendering || !USE_DOUBLE_BUFFERING);
+    drawScreen(displayProxy, needsUpdate, false, staticRendering || !USE_DOUBLE_BUFFERING);
     updateDisplay();
     if (USE_DOUBLE_BUFFERING && !staticRendering)
-        drawScreen(display, needsUpdate, false, true);
+        drawScreen(displayProxy, needsUpdate, false, true);
     needsUpdate = false;
 }
 
